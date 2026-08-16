@@ -1,0 +1,38 @@
+{
+  "name": "listingproof",
+  "version": "0.5.0",
+  "private": false,
+  "type": "module",
+  "scripts": {
+    "dev": "wxt",
+    "build": "wxt build && node scripts/assert-probe-free.mjs",
+    "test": "vitest run",
+    "postinstall": "wxt prepare",
+    "probe:search": "wxt --mode search-probe",
+    "zip": "wxt zip && node scripts/assert-probe-free.mjs",
+    "typecheck": "tsc --noEmit",
+    "generate": "vite-node scripts/make-synthetic.ts && vite-node scripts/make-injection.ts && vite-node scripts/make-icons.ts",
+    "scrub": "vite-node scripts/scrub-fixtures.ts",
+    "scrub:check": "vite-node scripts/scrub-fixtures.ts --check"
+  },
+  "devDependencies": {
+    "@types/jsdom": "^30.0.0",
+    "@types/leaflet": "^1.9.22",
+    "jsdom": "^29.1.1",
+    "typescript": "^5.6.0",
+    "vitest": "^3.0.0",
+    "wxt": "^0.20.0"
+  },
+  "description": "Chrome extension that checks a Booking.com listing against itself and its own history, and shows the evidence.",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/OWNER/listingproof.git"
+  },
+  "engines": {
+    "node": ">=20.11"
+  },
+  "dependencies": {
+    "leaflet": "^1.9.4"
+  }
+}

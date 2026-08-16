@@ -1,0 +1,429 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>ListingProof — map search</title>
+    <style>
+      /* Same palette and font stack as the side panel: light defaults,
+         dark via prefers-color-scheme. */
+      :root {
+        color-scheme: light dark;
+        --bg: #ffffff;
+        --fg: #1b1b1f;
+        --muted: #5c5f6b;
+        --line: #e2e3e8;
+        --card: #f7f7f9;
+        --red: #b3261e;
+        --focus: #2f6feb;
+        /* Violet marks the SELECTED result, and is deliberately none of
+           red/yellow/green/grey: those four are the verdict palette, and
+           verdict-coloured pins are a later phase — a selection wearing one
+           would claim an analysis that has not run. `--select` is fixed across
+           themes because it fills the map dot (map tiles are light either way)
+           and the list badge, both of which paint their own white text on it.
+           `--select-edge` and `--select-bg` sit on page chrome, so those two
+           follow the theme. Colour never carries the selection alone: the dot
+           and the badge both grow, which is what a colour-blind reader sees. */
+        --select: #7c2fd6;
+        --select-edge: #7c2fd6;
+        --select-bg: #f3ebfd;
+      }
+      @media (prefers-color-scheme: dark) {
+        :root {
+          --bg: #17181c;
+          --fg: #e8e8ec;
+          --muted: #a1a4b0;
+          --line: #2e3038;
+          --card: #1f2026;
+          --red: #f2b8b5;
+          --focus: #8ab4ff;
+          --select-edge: #b794ff;
+          --select-bg: #2a2140;
+        }
+      }
+      * { box-sizing: border-box; }
+      html, body { height: 100%; }
+      body {
+        margin: 0;
+        background: var(--bg);
+        color: var(--fg);
+        font: 14px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+        display: flex;
+        flex-direction: column;
+      }
+      /* h1 left, language picker right — the picker is page chrome, not a
+         search control, so it lives with the title rather than in the row. */
+      header {
+        padding: 12px 14px 0;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 10px;
+      }
+      h1 {
+        font-size: 13px;
+        letter-spacing: 0.06em;
+        text-transform: uppercase;
+        color: var(--muted);
+        margin: 0;
+      }
+      .controls {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 10px;
+        align-items: flex-end;
+        padding: 10px 14px;
+      }
+      .controls label, .controls .field {
+        display: flex;
+        flex-direction: column;
+        gap: 2px;
+        font-size: 12px;
+        color: var(--muted);
+      }
+      input[type="date"], input[type="number"], select {
+        font: inherit;
+        color: var(--fg);
+        background: var(--card);
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        padding: 5px 8px;
+      }
+      input[type="number"] { width: 68px; }
+      /* The sort control appears only once there are results to sort. */
+      .sort-field[hidden] { display: none; }
+      /* Popover controls (dates, type): a <details> whose summary looks like
+         the neighbouring inputs and whose panel drops below it. z-index must
+         beat Leaflet's panes (they reach ~700 in the root stacking context). */
+      details.popover { position: relative; }
+      details.popover > summary {
+        list-style: none;
+        font: inherit;
+        color: var(--fg);
+        background: var(--card);
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        padding: 5px 8px;
+        cursor: pointer;
+        user-select: none;
+        white-space: nowrap;
+      }
+      details.popover > summary::-webkit-details-marker { display: none; }
+      details.popover[open] > summary { border-color: var(--focus); }
+      details.popover > summary:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+      .popover-panel {
+        position: absolute;
+        top: calc(100% + 6px);
+        left: 0;
+        z-index: 1100;
+        background: var(--bg);
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        padding: 10px;
+        box-shadow: 0 4px 16px rgb(0 0 0 / 25%);
+        color: var(--fg);
+        font-size: 13px;
+      }
+      /* Calendar panel */
+      .cal-header { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 6px; }
+      .cal-header button { padding: 2px 9px; line-height: 1.2; }
+      .cal-month { font-weight: 600; text-align: center; }
+      .cal-weekdays, .cal-grid { display: grid; grid-template-columns: repeat(7, 34px); gap: 2px; }
+      .cal-weekdays span { text-align: center; font-size: 11px; color: var(--muted); }
+      .cal-grid button.day {
+        padding: 5px 0;
+        border: 1px solid transparent;
+        border-radius: 6px;
+        background: transparent;
+        text-align: center;
+      }
+      .cal-grid button.day:hover:not(:disabled) { border-color: var(--focus); }
+      .cal-grid button.day.in-range { background: var(--card); border-color: var(--line); }
+      .cal-grid button.day.edge { background: var(--focus); border-color: var(--focus); color: #fff; }
+      .cal-hint { margin: 8px 0 6px; font-size: 12px; color: var(--muted); }
+      .cal-clear { width: 100%; }
+      /* Type panel: row-flex checkbox lines, overriding the column layout
+         .controls label gives every other label on this page. */
+      .type-panel { display: flex; flex-direction: column; gap: 4px; min-width: 180px; }
+      .controls .type-panel label {
+        flex-direction: row;
+        align-items: center;
+        gap: 6px;
+        font-size: 13px;
+        color: var(--fg);
+        cursor: pointer;
+        white-space: nowrap;
+      }
+      /* Numbered result dots; same number as the list badge, so the map and
+         the list read as one. Neutral colour on purpose — verdict-coloured
+         pins are phase (c). */
+      .result-marker {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        width: 22px;
+        height: 22px;
+        border-radius: 50%;
+        background: var(--focus);
+        color: #fff;
+        font: 600 11px/1 -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+        border: 2px solid #fff;
+        box-shadow: 0 1px 3px rgb(0 0 0 / 40%);
+      }
+      /* The selected dot: a different fill AND a bigger, thicker-ringed
+         circle, so the highlight survives a colour-blind reader and a
+         greyscale screenshot. Leaflet writes the icon's size and centring
+         offset inline from iconSize/iconAnchor, so the grown dot has to beat
+         them — the same !important pattern .radius-label above uses. The
+         margins re-centre it on its coordinate at the larger size. */
+      .result-marker.selected {
+        width: 32px !important;
+        height: 32px !important;
+        margin: -16px 0 0 -16px !important;
+        background: var(--select);
+        border-width: 3px;
+        font-size: 13px;
+        box-shadow: 0 2px 7px rgb(0 0 0 / 45%);
+      }
+      /* The badge is a real button (it selects the result and points out its
+         dot), so it undoes the page's button chrome rather than wearing it. */
+      .result-ordinal {
+        flex: none;
+        align-self: start;
+        width: 20px;
+        height: 20px;
+        padding: 0;
+        border: none;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        border-radius: 50%;
+        background: var(--focus);
+        color: #fff;
+        font-size: 11px;
+        font-weight: 600;
+        cursor: pointer;
+      }
+      /* Selected card: the badge grows and changes fill exactly as its map dot
+         does (the size is the part that does not depend on seeing colour), and
+         the card itself gains a tint and a solid left bar — an inset shadow,
+         so nothing reflows when the selection moves. */
+      li.result.selected {
+        border-color: var(--select-edge);
+        background: var(--select-bg);
+        box-shadow: inset 3px 0 0 var(--select-edge);
+      }
+      li.result.selected .result-ordinal {
+        width: 26px;
+        height: 26px;
+        font-size: 13px;
+        background: var(--select);
+      }
+      button {
+        font: inherit;
+        color: var(--fg);
+        background: var(--card);
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        padding: 7px 12px;
+        cursor: pointer;
+      }
+      button:hover:not(:disabled) { border-color: var(--focus); }
+      button:disabled { opacity: 0.55; cursor: default; }
+      button[aria-pressed="true"] { border-color: var(--focus); color: var(--focus); }
+      a { color: var(--focus); }
+      a:focus-visible, button:focus-visible, input:focus-visible {
+        outline: 2px solid var(--focus);
+        outline-offset: 2px;
+      }
+      .status {
+        margin: 0;
+        padding: 6px 14px 8px;
+        font-size: 13px;
+        color: var(--muted);
+        min-height: 1.9em;
+        border-bottom: 1px solid var(--line);
+      }
+      .status.err { color: var(--red); }
+      /* Technical text we did not author (worker errors): kept visible and
+         copyable, but visibly secondary — it is never part of the translated
+         sentence above it. */
+      .status .detail {
+        display: block;
+        font-size: 12px;
+        color: var(--muted);
+        overflow-wrap: anywhere;
+      }
+      .content { flex: 1; display: flex; min-height: 0; }
+      #map { flex: 1; min-width: 0; background: var(--card); }
+      /* Beat Leaflet's own pane cursors while an area is being drawn. */
+      #map.drawing, #map.drawing * { cursor: crosshair !important; }
+      /* The live distance along the radius line while a circle is being
+         dragged. Sized by its own text (the divIcon ships no iconSize), so
+         the !important guards beat Leaflet's inline width/height should a
+         future default reintroduce them. Offset off the cursor so the
+         crosshair never sits on top of the number it is producing. */
+      .radius-label {
+        width: auto !important;
+        height: auto !important;
+        margin: -26px 0 0 12px !important;
+        padding: 2px 7px;
+        border-radius: 6px;
+        background: var(--card);
+        border: 1px solid var(--focus);
+        color: var(--fg);
+        font-size: 12px;
+        font-weight: 600;
+        line-height: 1.5;
+        white-space: nowrap;
+        pointer-events: none;
+      }
+      .results {
+        width: 340px;
+        flex: none;
+        overflow-y: auto;
+        border-left: 1px solid var(--line);
+        padding: 10px 12px;
+      }
+      @media (max-width: 720px) {
+        .content { flex-direction: column; }
+        .results {
+          width: auto;
+          height: 40%;
+          border-left: none;
+          border-top: 1px solid var(--line);
+        }
+      }
+      ul#results { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
+      li.result {
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        background: var(--card);
+        padding: 8px 10px;
+        display: flex;
+        gap: 10px;
+        align-items: flex-start;
+        /* The whole card selects it on the map — the numbered button says so
+           in words; this says so to the pointer. */
+        cursor: pointer;
+      }
+      li.result img {
+        width: 64px;
+        height: 64px;
+        object-fit: cover;
+        border-radius: 6px;
+        flex: none;
+      }
+      li.result .name, .marker-popup .name { font-weight: 600; }
+      /* The property photo in a marker popup: the same picture the list card
+         shows (64px there), given more room here because a popup has it. 200px
+         is the deliberate part — it is wide enough to read as the place and to
+         hold the popup's two actions on one line, and still well inside
+         Leaflet's 300px popup maximum. 16:9, cropped, like the list card. The
+         rule touches only the <img>, so a card with no usable thumbnail
+         renders no image and no gap where one would have been. */
+      .marker-popup img {
+        display: block;
+        width: 200px;
+        height: 112px;
+        object-fit: cover;
+        border-radius: 6px;
+        margin-bottom: 6px;
+      }
+      li.result .meta { margin: 2px 0 0; font-size: 12px; color: var(--muted); }
+      /* Both card actions are explicit and labelled: a button that checks the
+         listing here, and a link that opens it on the platform. */
+      .card-actions {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        gap: 10px;
+        margin-top: 6px;
+      }
+      button.check-button { padding: 3px 9px; font-size: 12px; border-radius: 6px; }
+      .open-link { display: inline-block; font-size: 12px; }
+    </style>
+  </head>
+  <body>
+    <header>
+      <h1 data-i18n="search.title">ListingProof — map search</h1>
+      <!-- Options come from SUPPORTED_LANGUAGES in main.ts; empty until then. -->
+      <select id="language" aria-label="Language" data-i18n-attr="aria-label:common.language"></select>
+    </header>
+    <!-- Defaults (dates, min/max) are set by main.ts from lib/areasearch's
+         bounds; the static attributes here are a no-JS fallback only.
+         English text stays inline (readable, greppable); applyTranslations
+         swaps it at load via the data-i18n keys. Label text sits in a <span>
+         because a bare text node gives applyTranslations nothing to target. -->
+    <div class="controls">
+      <!-- One control for the whole stay: the <summary> shows the current
+           selection (text set by main.ts), the panel is a range calendar.
+           The grid, month name and weekday row are rendered by main.ts via
+           Intl, so the panel ships mostly empty. -->
+      <div class="field">
+        <span data-i18n="search.form.dates">Dates</span>
+        <details class="popover" id="dates-popover">
+          <summary id="dates-summary">Choose dates</summary>
+          <div class="popover-panel cal-panel">
+            <div class="cal-header">
+              <button id="cal-prev" type="button" aria-label="Previous month"
+                data-i18n-attr="aria-label:search.dates.prevMonth">&#8249;</button>
+              <span class="cal-month" id="cal-month"></span>
+              <button id="cal-next" type="button" aria-label="Next month"
+                data-i18n-attr="aria-label:search.dates.nextMonth">&#8250;</button>
+            </div>
+            <div class="cal-weekdays" id="cal-weekdays"></div>
+            <div class="cal-grid" id="cal-grid"></div>
+            <p class="cal-hint" id="cal-hint"></p>
+            <button id="cal-clear" type="button" class="cal-clear" data-i18n="search.dates.withoutDates">Search without dates</button>
+          </div>
+        </details>
+      </div>
+      <label><span data-i18n="search.form.adults">Adults</span> <input id="adults" type="number" value="2" min="1" max="30" /></label>
+      <label><span data-i18n="search.form.rooms">Rooms</span> <input id="rooms" type="number" value="1" min="1" max="30" /></label>
+      <label><span data-i18n="search.form.children">Children</span> <input id="children" type="number" value="0" min="0" max="10" /></label>
+      <!-- Category filter: the ten SEARCH_CATEGORIES from lib/areasearch, in
+           vocabulary order; checkbox values ARE the vocabulary strings. The
+           summary count is kept current by main.ts; the filter itself applies
+           on the next Search press, like every other control here. -->
+      <div class="field">
+        <span data-i18n="search.form.type">Type</span>
+        <details class="popover" id="type-popover">
+          <summary id="type-summary">Any type</summary>
+          <div class="popover-panel type-panel">
+            <label><input type="checkbox" value="hotel" /> <span data-i18n="search.category.hotel">Hotels</span></label>
+            <label><input type="checkbox" value="apartment" /> <span data-i18n="search.category.apartment">Apartments</span></label>
+            <label><input type="checkbox" value="holiday-home" /> <span data-i18n="search.category.holidayHome">Vacation homes</span></label>
+            <label><input type="checkbox" value="villa" /> <span data-i18n="search.category.villa">Villas</span></label>
+            <label><input type="checkbox" value="guesthouse" /> <span data-i18n="search.category.guesthouse">Guesthouses</span></label>
+            <label><input type="checkbox" value="bnb" /> <span data-i18n="search.category.bnb">Bed and breakfasts</span></label>
+            <label><input type="checkbox" value="hostel" /> <span data-i18n="search.category.hostel">Hostels</span></label>
+            <label><input type="checkbox" value="resort" /> <span data-i18n="search.category.resort">Resorts</span></label>
+            <label><input type="checkbox" value="chalet" /> <span data-i18n="search.category.chalet">Chalets</span></label>
+            <label><input type="checkbox" value="campground" /> <span data-i18n="search.category.campground">Campgrounds</span></label>
+          </div>
+        </details>
+      </div>
+      <button id="draw" type="button" aria-pressed="false" data-i18n="search.form.selectArea">Select area</button>
+      <button id="search" type="button" disabled data-i18n="search.form.search">Search</button>
+      <label class="field sort-field" hidden id="sort-field"
+        ><span data-i18n="search.sort.label">Sort by</span>
+        <select id="sort">
+          <option value="price-asc" selected data-i18n="search.sort.cheapest">Cheapest first</option>
+          <option value="price-desc" data-i18n="search.sort.expensive">Most expensive first</option>
+          <option value="rating-desc" data-i18n="search.sort.bestRated">Best rated first</option>
+          <option value="platform" data-i18n="search.sort.platformOrder">Platform order</option>
+        </select>
+      </label>
+    </div>
+    <p class="status" id="status" role="status"></p>
+    <div class="content">
+      <div id="map"></div>
+      <aside class="results" aria-label="Search results" data-i18n-attr="aria-label:search.results.ariaLabel">
+        <ul id="results"></ul>
+      </aside>
+    </div>
+    <script type="module" src="./main.ts"></script>
+  </body>
+</html>

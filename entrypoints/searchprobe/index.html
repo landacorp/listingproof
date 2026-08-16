@@ -1,0 +1,44 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>ListingProof — searchresults probe</title>
+    <style>
+      body {
+        margin: 0;
+        padding: 16px;
+        background: #101216;
+        color: #e8eaef;
+        font: 14px/1.5 -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      }
+      h1 { font-size: 14px; text-transform: uppercase; letter-spacing: 0.06em; color: #9aa0ae; }
+      table { border-collapse: collapse; width: 100%; margin-top: 12px; }
+      th, td { text-align: left; padding: 6px 10px; border-bottom: 1px solid #2a2d35; }
+      th { color: #9aa0ae; font-weight: 600; }
+      .results { color: #57d98a; }
+      .challenge { color: #ff7a72; }
+      .other { color: #f0c674; }
+      .error { color: #ff7a72; }
+      #log { margin-top: 14px; color: #9aa0ae; white-space: pre-wrap; font-family: ui-monospace, monospace; font-size: 12px; }
+      button { background: #1c1f26; color: inherit; border: 1px solid #3a3e48; border-radius: 8px; padding: 6px 12px; cursor: pointer; }
+    </style>
+  </head>
+  <body>
+    <h1>searchresults.html probe — dev only, never shipped</h1>
+    <p>
+      Answers ROADMAP's map-search phase (a): can the service worker fetch Booking search
+      results where curl gets the Akamai challenge? Open with <code>?auto=1</code> (the worker
+      does this when launched via <code>npm run probe:search</code>) or press Run. Artifacts are
+      POSTed to the fixture capture server on <code>127.0.0.1:8787</code> if it is running.
+    </p>
+    <button id="run">Run probe</button>
+    <table hidden id="table">
+      <thead>
+        <tr><th>step</th><th>status</th><th>chars</th><th>cards</th><th>/hotel/ links</th><th>verdict</th><th>note</th></tr>
+      </thead>
+      <tbody id="rows"></tbody>
+    </table>
+    <div id="log"></div>
+    <script type="module" src="./main.ts"></script>
+  </body>
+</html>

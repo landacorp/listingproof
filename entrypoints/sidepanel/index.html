@@ -1,0 +1,266 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>ListingProof</title>
+    <style>
+      /* Verdict colours are paired with a text label and a shape in every
+         place they appear: colour alone must never be the carrier of the
+         verdict, both for colour-blind users and for screenshots. */
+      :root {
+        color-scheme: light dark;
+        --bg: #ffffff;
+        --fg: #1b1b1f;
+        --muted: #5c5f6b;
+        --line: #e2e3e8;
+        --card: #f7f7f9;
+        --red: #b3261e;
+        --red-bg: #fceceb;
+        --yellow: #8a6100;
+        --yellow-bg: #fdf3e0;
+        --green: #1e6b3a;
+        --green-bg: #eaf5ee;
+        --gray: #4a4d57;
+        --gray-bg: #f0f0f3;
+        --focus: #2f6feb;
+      }
+      @media (prefers-color-scheme: dark) {
+        :root {
+          --bg: #17181c;
+          --fg: #e8e8ec;
+          --muted: #a1a4b0;
+          --line: #2e3038;
+          --card: #1f2026;
+          --red: #f2b8b5;
+          --red-bg: #3b1a18;
+          --yellow: #f5cf7e;
+          --yellow-bg: #3a2d10;
+          --green: #9bd7ae;
+          --green-bg: #14301f;
+          --gray: #c2c5cf;
+          --gray-bg: #26282f;
+          --focus: #8ab4ff;
+        }
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        background: var(--bg);
+        color: var(--fg);
+        font: 14px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      }
+      main { padding: 14px; }
+      /* Wordmark left, language picker in the middle, version right — neither
+         of the two controls is about the listing, so both sit out of the way.
+         The panel is ~320-400 px wide: nothing here may wrap, so the wordmark
+         and the select are both allowed to shrink and the version is not. */
+      .titlebar {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 8px;
+        margin: 0 0 12px;
+      }
+      h1 {
+        font-size: 13px;
+        letter-spacing: 0.06em;
+        text-transform: uppercase;
+        color: var(--muted);
+        margin: 0;
+        min-width: 0;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+      /* Muted chrome, like the version beside it: a preference, not an action
+         the panel is asking for. */
+      select.language {
+        font: inherit;
+        font-size: 12px;
+        color: var(--muted);
+        background: var(--card);
+        border: 1px solid var(--line);
+        border-radius: 6px;
+        padding: 1px 4px;
+        max-width: 40%;
+        min-width: 0;
+      }
+      select.language:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+      /* Reads as plain text and gives no hint of being pressable: it is the
+         way into the map search page, which is deliberately unadvertised.
+         Still a real <button>, so keyboard and screen-reader users can reach
+         what mouse users can. */
+      button.version {
+        font: inherit;
+        font-size: 13px;
+        color: var(--muted);
+        opacity: 0.75;
+        background: none;
+        border: 0;
+        padding: 0;
+        cursor: default;
+        flex: none;
+      }
+      button.version:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+      .verdict {
+        border: 1px solid currentColor;
+        border-radius: 10px;
+        padding: 12px 14px;
+        margin-bottom: 14px;
+      }
+      .verdict-label { font-size: 20px; font-weight: 700; margin: 0 0 4px; }
+      .verdict-sub { margin: 0; font-size: 13px; }
+      .v-RED { color: var(--red); background: var(--red-bg); }
+      .v-YELLOW { color: var(--yellow); background: var(--yellow-bg); }
+      .v-GREEN { color: var(--green); background: var(--green-bg); }
+      .v-GRAY { color: var(--gray); background: var(--gray-bg); }
+      .property { margin: 0 0 14px; }
+      .property-name { font-weight: 600; font-size: 15px; }
+      .property-meta { color: var(--muted); font-size: 12px; word-break: break-word; }
+      h2 {
+        font-size: 12px;
+        text-transform: uppercase;
+        letter-spacing: 0.05em;
+        color: var(--muted);
+        margin: 16px 0 8px;
+      }
+      ul.reasons { margin: 0 0 4px; padding-left: 18px; }
+      ul.reasons li { margin-bottom: 4px; }
+      .evidence { display: flex; flex-direction: column; gap: 8px; }
+      .row {
+        border: 1px solid var(--line);
+        border-left-width: 4px;
+        border-radius: 8px;
+        background: var(--card);
+        padding: 10px 12px;
+      }
+      .row.s-RED { border-left-color: var(--red); }
+      .row.s-YELLOW { border-left-color: var(--yellow); }
+      .row.s-GRAY { border-left-color: var(--gray); }
+      .row-head { display: flex; align-items: baseline; gap: 8px; }
+      .rule-id {
+        font: 600 11px/1.4 ui-monospace, SFMono-Regular, Menlo, monospace;
+        color: var(--muted);
+        border: 1px solid var(--line);
+        border-radius: 4px;
+        padding: 0 5px;
+        flex: none;
+      }
+      .row-title { font-weight: 600; }
+      .row-detail { color: var(--muted); margin: 6px 0 0; font-size: 13px; }
+      dl.values { margin: 8px 0 0; display: grid; grid-template-columns: auto 1fr; gap: 2px 10px; font-size: 12px; }
+      dl.values dt { color: var(--muted); }
+      dl.values dd { margin: 0; word-break: break-word; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+      .links { margin: 8px 0 0; display: flex; flex-wrap: wrap; gap: 10px; font-size: 12px; }
+      a { color: var(--focus); }
+      a:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+      .empty { color: var(--muted); }
+      .terms { display: flex; flex-direction: column; gap: 8px; }
+      .term {
+        border: 1px solid var(--line);
+        border-left-width: 4px;
+        border-radius: 8px;
+        background: var(--card);
+        padding: 10px 12px;
+      }
+      .term.t-warn { border-left-color: var(--yellow); }
+      .term.t-notice { border-left-color: var(--gray); }
+      .term-title { font-weight: 600; }
+      .term-detail { color: var(--muted); margin: 6px 0 0; font-size: 13px; }
+      .term-quote {
+        margin: 8px 0 0;
+        padding-left: 10px;
+        border-left: 2px solid var(--line);
+        color: var(--muted);
+        font-size: 12px;
+        font-style: italic;
+      }
+      /* "What guests wrote". Deliberately quieter than the verdict and without
+         a severity colour of its own: the scanner grades nothing, and a review
+         must never look like a finding the extension stands behind. */
+      .reviews { display: flex; flex-direction: column; gap: 8px; }
+      .review {
+        border: 1px solid var(--line);
+        border-left-width: 4px;
+        border-left-color: var(--gray);
+        border-radius: 8px;
+        background: var(--card);
+        padding: 10px 12px;
+      }
+      .review-head { display: flex; align-items: baseline; gap: 8px; }
+      /* The platform's own pair, never converted — monospace so 2/10 beside
+         1/5 reads as two different scales rather than two similar numbers. */
+      .review-score {
+        font: 600 12px/1.4 ui-monospace, SFMono-Regular, Menlo, monospace;
+        border: 1px solid var(--line);
+        border-radius: 4px;
+        padding: 0 5px;
+        flex: none;
+      }
+      .review-age { color: var(--muted); font-size: 12px; }
+      .review-reason { margin: 6px 0 0; font-size: 13px; }
+      .review-field { margin: 6px 0 0; color: var(--muted); font-size: 12px; }
+      /* The guest's words, styled like the page quote in the terms section so
+         that what someone else wrote never reads as something we wrote. */
+      blockquote.review-quote {
+        margin: 4px 0 0;
+        padding-left: 10px;
+        border-left: 2px solid var(--line);
+        color: var(--muted);
+        font-size: 12px;
+        font-style: italic;
+        word-break: break-word;
+      }
+      .review-note { margin: 0 0 2px; color: var(--muted); font-size: 12px; }
+      .review-notes {
+        margin-top: 2px;
+        border-top: 1px dashed var(--line);
+        padding-top: 8px;
+      }
+      .llm-note {
+        margin-top: 10px;
+        font-size: 12px;
+        color: var(--muted);
+        border-top: 1px dashed var(--line);
+        padding-top: 8px;
+      }
+      .spinner {
+        display: inline-block;
+        width: 11px; height: 11px;
+        border: 2px solid currentColor;
+        border-right-color: transparent;
+        border-radius: 50%;
+        animation: spin 0.7s linear infinite;
+        vertical-align: -1px;
+      }
+      @keyframes spin { to { transform: rotate(360deg); } }
+      @media (prefers-reduced-motion: reduce) { .spinner { animation: none; } }
+    </style>
+  </head>
+  <body>
+    <main>
+      <!-- The version is filled from the manifest by main.ts (MV3 CSP bars
+           inline script), so the display can never drift from the installed
+           build. It doubles as the unadvertised way into the map search page
+           — see main.ts. -->
+      <div class="titlebar">
+        <h1>ListingProof</h1>
+        <!-- Options come from SUPPORTED_LANGUAGES in main.ts; empty until then.
+             The panel is often the only surface a user opens, so the language
+             lives here as well as on the options and search pages. -->
+        <select
+          class="language"
+          id="language"
+          aria-label="Language"
+          data-i18n-attr="aria-label:common.language"
+        ></select>
+        <button class="version" id="version" type="button"></button>
+      </div>
+      <!-- Rendered by main.ts. aria-live so a verdict arriving after the
+           deterministic pass (Engine L) is announced, not silently swapped. -->
+      <div id="app" aria-live="polite"></div>
+    </main>
+    <script type="module" src="./main.ts"></script>
+  </body>
+</html>

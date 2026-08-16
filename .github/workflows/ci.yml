@@ -1,0 +1,56 @@
+name: CI
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+
+jobs:
+  test:
+    # Booking's markup drifts, so the fixture corpus is the early-warning
+    # system: a green CI here means the extractor still reads real pages.
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        # The extension ships browser code, but the build and test tooling has
+        # to work for contributors on any platform.
+        os: [ubuntu-latest, windows-latest, macos-latest]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+
+      - name: No third-party credentials in fixtures
+        # Captured pages carry other people's API keys and session tokens.
+        # GitHub secret scanning alerts on every commit in history, not just
+        # HEAD, so a leak here is expensive to undo — catch it at the PR.
+        run: npm run scrub:check
+
+      - name: Typecheck
+        run: npx tsc --noEmit
+
+      - name: Test
+        # The Ollama integration test skips itself when no local model is
+        # present, which is always the case on a runner.
+        run: npm test
+
+      - name: Build
+        run: npm run build
+
+      - name: Regenerate derived fixtures and fail if they drifted
+        # The synthetic and injection corpora are generated. If a generator
+        # changed without the output being regenerated, the committed files are
+        # stale and the suite is testing something nobody wrote.
+        shell: bash
+        run: |
+          npx vite-node scripts/make-synthetic.ts
+          npx vite-node scripts/make-injection.ts
+          npx vite-node scripts/make-icons.ts
+          git diff --exit-code -- fixtures/synthetic fixtures/injection public/icon

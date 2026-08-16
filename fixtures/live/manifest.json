@@ -1,0 +1,19 @@
+{
+  "capturedAt": "2026-08-11",
+  "note": "Rendered-DOM snapshots of live Booking.com property pages (document.documentElement.outerHTML after hydration), saved via localhost bridge. Two real in-the-wild hijacks: fr-hijack-paris-eiffel (Alpine slug, Paris page) and fr-hijack-gite-chassagne (a gite in rural Chassagne now serving 'Le Grand Paris Apartments'). Both were found by the extension in normal use.",
+  "fixtures": {
+    "de-schulz-berlin-wall.de.html": "https://www.booking.com/hotel/de/schulz-berlin-wall-at-the-east-side-gallery.de.html",
+    "es-catalonia-la-boqueria.es.html": "https://www.booking.com/hotel/es/catalonia-la-boqueria.es.html",
+    "fr-hijack-paris-eiffel.en-gb.html": "https://www.booking.com/hotel/fr/l-39-horizon-des-alpes-le-petit-bornand-les-glieres.en-gb.html",
+    "fr-le-regent-paris.fr.html": "https://www.booking.com/hotel/fr/le-regent-paris.fr.html",
+    "gb-strandpalace.en-gb.html": "https://www.booking.com/hotel/gb/strandpalace.en-gb.html",
+    "gr-electra-metropolis.el.html": "https://www.booking.com/hotel/gr/electra-metropolis.el.html",
+    "it-grand-rimini.it.html": "https://www.booking.com/hotel/it/grand-rimini.it.html",
+    "it-hotelbellevue_rimini.en-us.html": "https://www.booking.com/hotel/it/hotelbellevue_rimini.en-us.html",
+    "jp-shibuya-excel-tokyu.ja.html": "https://www.booking.com/hotel/jp/shibuya-excel-tokyu.ja.html",
+    "nl-nhcollection-flower-market.nl.html": "https://www.booking.com/hotel/nl/nhcollection-amsterdam-flower-market.nl.html",
+    "pt-corpo-santo.pt-pt.html": "https://www.booking.com/hotel/pt/corpo-santo.pt-pt.html",
+    "us-the-warwick-new-york.html": "https://www.booking.com/hotel/us/the-warwick-new-york.html",
+    "fr-hijack-gite-chassagne.en-gb.html": "https://www.booking.com/hotel/fr/gitenchassagne.en-gb.html"
+  }
+}

@@ -1,0 +1,9 @@
+{
+  "capturedAt": "2026-08-14",
+  "note": "Booking searchresults.html captures from the map-search phase (a) probe (npm run probe:search). The probe proved the service worker CAN fetch search results — but only with the profile's Akamai cookies present (one real-tab visit to booking.com sets them; the challenge solves itself invisibly) AND credentials: 'include' on the fetch. Cold jar or omitted credentials gets the HTTP 202 challenge stub regardless. *.worker.html is a worker fetch (the feature's primary path, HTTP 200, 25 property cards); *.tab.html is a hydrated real-tab DOM read via scripting.executeScript (the fallback path, 25 cards); challenge-202.html is the refusal body whose markers lib/sites/booking/searchprobe.ts encodes. Phase (b)'s parseSearchResults grows against these.",
+  "fixtures": {
+    "challenge-202.html": "https://www.booking.com/searchresults.html?dest_type=latlong&latitude=48.8566&longitude=2.3522&radius=5&checkin=2026-09-10&checkout=2026-09-12&group_adults=2&no_rooms=1&group_children=0",
+    "fr-nice-latlong-dated.worker.html": "https://www.booking.com/searchresults.html?dest_type=latlong&latitude=43.7102&longitude=7.262&radius=5&checkin=2026-09-17&checkout=2026-09-19&group_adults=2&no_rooms=1&group_children=0",
+    "fr-paris-latlong-dated.tab.html": "https://www.booking.com/searchresults.html?dest_type=latlong&latitude=48.8566&longitude=2.3522&radius=5&checkin=2026-09-10&checkout=2026-09-12&group_adults=2&no_rooms=1&group_children=0"
+  }
+}

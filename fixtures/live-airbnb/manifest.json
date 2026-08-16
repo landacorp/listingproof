@@ -1,0 +1,13 @@
+{
+  "capturedAt": "2026-08-11",
+  "note": "Real Airbnb listing pages, fetched server-side. Airbnb serves schema.org VacationRental with top-level coordinates; its URLs carry no name, which is why the Airbnb adapter declares nameBearingUrl false.",
+  "fixtures": {
+    "fr-paris-montmartre.en.html": "https://www.airbnb.com/rooms/1725991277287663886",
+    "jp-tokyo2.en.html": "https://www.airbnb.com/rooms/1725852994406924663",
+    "es-barcelona2.en.html": "https://www.airbnb.com/rooms/1704906788837184002",
+    "it-roma-1.html": "https://www.airbnb.com/rooms/1736387261430847289",
+    "it-roma-2.html": "https://www.airbnb.com/rooms/1600030586695407460",
+    "br-rio-1.html": "https://www.airbnb.com/rooms/1715357532731129387",
+    "br-rio-2.html": "https://www.airbnb.com/rooms/1581922106059514513"
+  }
+}

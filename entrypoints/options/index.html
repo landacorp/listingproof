@@ -1,0 +1,156 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>ListingProof settings</title>
+    <meta name="manifest.open_in_tab" content="true" />
+    <style>
+      :root {
+        color-scheme: light dark;
+        --bg: #ffffff;
+        --fg: #1b1b1f;
+        --muted: #5c5f6b;
+        --line: #e2e3e8;
+        --card: #f7f7f9;
+        --green: #1e6b3a;
+        --red: #b3261e;
+        --focus: #2f6feb;
+      }
+      @media (prefers-color-scheme: dark) {
+        :root {
+          --bg: #17181c;
+          --fg: #e8e8ec;
+          --muted: #a1a4b0;
+          --line: #2e3038;
+          --card: #1f2026;
+          --green: #9bd7ae;
+          --red: #f2b8b5;
+          --focus: #8ab4ff;
+        }
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        background: var(--bg);
+        color: var(--fg);
+        font: 14px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      }
+      main { max-width: 640px; margin: 0 auto; padding: 24px 16px 48px; }
+      h1 { font-size: 18px; margin: 0 0 4px; }
+      .tagline { color: var(--muted); margin: 0 0 24px; }
+      section {
+        border: 1px solid var(--line);
+        border-radius: 10px;
+        background: var(--card);
+        padding: 16px;
+        margin-bottom: 16px;
+      }
+      h2 { font-size: 15px; margin: 0 0 4px; }
+      .hint { color: var(--muted); font-size: 13px; margin: 0 0 12px; }
+      ul.sites { list-style: none; margin: 0 0 12px; padding: 0; }
+      ul.sites li {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 8px;
+        padding: 6px 0;
+        border-bottom: 1px solid var(--line);
+      }
+      ul.sites li:last-child { border-bottom: none; }
+      ul.sites .builtin { color: var(--muted); }
+      form.add { display: flex; gap: 8px; }
+      input[type="text"], input[type="url"], select {
+        font: inherit;
+        color: var(--fg);
+        background: var(--bg);
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        padding: 7px 10px;
+        flex: 1;
+        min-width: 0;
+      }
+      select#language { display: block; min-width: 200px; margin-bottom: 8px; }
+      button {
+        font: inherit;
+        color: var(--fg);
+        background: var(--bg);
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        padding: 7px 12px;
+        cursor: pointer;
+        flex: none;
+      }
+      button:hover { border-color: var(--focus); }
+      a { color: var(--focus); }
+      input:focus-visible, button:focus-visible, select:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+      .status { font-size: 13px; margin: 8px 0 0; min-height: 1.2em; }
+      .status.ok { color: var(--green); }
+      .status.err { color: var(--red); }
+      .field { display: block; margin: 0 0 12px; }
+      .field span { display: block; font-weight: 600; margin-bottom: 4px; }
+      .field input[type="text"], .field input[type="url"] { width: 100%; }
+    </style>
+  </head>
+  <body>
+    <main>
+      <h1>ListingProof</h1>
+      <p class="tagline" data-i18n="options.tagline">Checks an accommodation listing for contradictions on the page itself.</p>
+
+      <section aria-labelledby="sites-h">
+        <h2 id="sites-h" data-i18n="options.sites.heading">Checked sites</h2>
+        <p class="hint" data-i18n="options.sites.hint">
+          Booking.com and Airbnb are checked out of the box. Add any other booking
+          site here — if its pages carry standard listing markup (schema.org
+          lodging data), ListingProof can check them too. Adding a site asks the
+          browser to allow ListingProof on that site only.
+        </p>
+        <ul class="sites" id="sites-list"></ul>
+        <form class="add" id="site-form">
+          <input
+            id="site-input"
+            type="text"
+            placeholder="hotel-site.com — or paste a listing address"
+            aria-label="Site to add"
+            data-i18n-attr="placeholder:options.sites.inputPlaceholder;aria-label:options.sites.inputAriaLabel"
+          />
+          <button type="submit" data-i18n="options.sites.addButton">Add site</button>
+        </form>
+        <p class="status" id="site-status" role="status"></p>
+      </section>
+
+      <section aria-labelledby="llm-h">
+        <h2 id="llm-h" data-i18n="options.llm.heading">Local model (optional)</h2>
+        <p class="hint">
+          <span data-i18n="options.llm.hintBefore">With</span>
+          <a href="https://ollama.com" target="_blank" rel="noreferrer">Ollama</a>
+          <span data-i18n="options.llm.hintAfter">installed, ListingProof also reads the
+          listing's description and reviews locally — nothing leaves your machine. See
+          the setup notes in the project's</span>
+          <code>docs/ollama-setup.md</code>
+          <span data-i18n="options.llm.hintEnd">for the one required environment variable.</span>
+        </p>
+        <label class="field">
+          <span data-i18n="options.llm.endpointLabel">Ollama address</span>
+          <input id="ollama-endpoint" type="url" placeholder="http://localhost:11434" />
+        </label>
+        <label class="field">
+          <span data-i18n="options.llm.modelLabel">Model (empty = pick automatically)</span>
+          <input id="ollama-model" type="text" placeholder="llama3.1:8b" />
+        </label>
+      </section>
+
+      <section aria-labelledby="language-h">
+        <h2 id="language-h"><span data-i18n="common.language">Language</span></h2>
+        <select id="language" aria-labelledby="language-h"></select>
+        <p class="hint" data-i18n="options.language.machineNote">
+          Translations are machine-made (Google Translate); English is the original.
+        </p>
+      </section>
+
+      <button id="settings-save" data-i18n="options.saveButton">Save settings</button>
+      <p class="status" id="settings-status" role="status"></p>
+    </main>
+    <script type="module" src="./main.ts"></script>
+  </body>
+</html>

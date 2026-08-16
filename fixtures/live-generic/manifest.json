@@ -1,0 +1,8 @@
+{
+  "capturedAt": "2026-08-11",
+  "note": "Real third-party hotel-chain pages that no bespoke adapter handles. They are the evidence that the generic schema.org adapter works with no per-site code. Fetched server-side; both publish @type Hotel with GeoCoordinates and AggregateRating.",
+  "fixtures": {
+    "gb-premierinn-county-hall.html": "https://www.premierinn.com/gb/en/hotels/england/greater-london/london/london-county-hall.html",
+    "fr-accor-1393.html": "https://all.accor.com/hotel/1393/index.en.shtml"
+  }
+}

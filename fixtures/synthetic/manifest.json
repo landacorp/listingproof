@@ -1,0 +1,70 @@
+{
+  "generatedFrom": "fixtures/live",
+  "cases": [
+    {
+      "file": "de-schulz-berlin-wall.de.base.html",
+      "description": "Well-formed listing page with a complete identity and nothing contradictory.",
+      "expectVerdict": "GREEN"
+    },
+    {
+      "file": "es-catalonia-la-boqueria.es.base.html",
+      "description": "Well-formed listing page with a complete identity and nothing contradictory.",
+      "expectVerdict": "GREEN"
+    },
+    {
+      "file": "fr-hijack-gite-chassagne.en-gb.base.html",
+      "description": "Well-formed listing page with a complete identity and nothing contradictory.",
+      "expectVerdict": "GREEN"
+    },
+    {
+      "file": "fr-hijack-paris-eiffel.en-gb.base.html",
+      "description": "Well-formed listing page with a complete identity and nothing contradictory.",
+      "expectVerdict": "GREEN"
+    },
+    {
+      "file": "fr-le-regent-paris.fr.base.html",
+      "description": "Well-formed listing page with a complete identity and nothing contradictory.",
+      "expectVerdict": "GREEN"
+    },
+    {
+      "file": "gb-strandpalace.en-gb.base.html",
+      "description": "Well-formed listing page with a complete identity and nothing contradictory.",
+      "expectVerdict": "GREEN"
+    },
+    {
+      "file": "gr-electra-metropolis.el.base.html",
+      "description": "Well-formed listing page with a complete identity and nothing contradictory.",
+      "expectVerdict": "GREEN"
+    },
+    {
+      "file": "it-grand-rimini.it.base.html",
+      "description": "Well-formed listing page with a complete identity and nothing contradictory.",
+      "expectVerdict": "GREEN"
+    },
+    {
+      "file": "it-hotelbellevue_rimini.en-us.base.html",
+      "description": "Well-formed listing page with a complete identity and nothing contradictory.",
+      "expectVerdict": "GREEN"
+    },
+    {
+      "file": "jp-shibuya-excel-tokyu.ja.base.html",
+      "description": "Well-formed listing page with a complete identity and nothing contradictory.",
+      "expectVerdict": "GREEN"
+    },
+    {
+      "file": "nl-nhcollection-flower-market.nl.base.html",
+      "description": "Well-formed listing page with a complete identity and nothing contradictory.",
+      "expectVerdict": "GREEN"
+    },
+    {
+      "file": "pt-corpo-santo.pt-pt.base.html",
+      "description": "Well-formed listing page with a complete identity and nothing contradictory.",
+      "expectVerdict": "GREEN"
+    },
+    {
+      "file": "us-the-warwick-new-york.base.html",
+      "description": "Well-formed listing page with a complete identity and nothing contradictory.",
+      "expectVerdict": "GREEN"
+    }
+  ]
+}
