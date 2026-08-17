@@ -1,7 +1,11 @@
-// Tripwire for the store-build invariant: no map-search probe TOOLING may
-// reach a production build — not the searchprobe page, not the worker's
-// SEARCH_PROBE_FETCH listener (a credentialed fetch-any-URL primitive).
+// Tripwire for the store-build invariant: no probe TOOLING may reach a
+// production build — not the searchprobe page, not the worker's
+// SEARCH_PROBE_FETCH listener (a credentialed fetch-any-URL primitive), not
+// the permprobe page or its worker half (which drives other tabs around).
 // The searchresults host permission itself ships since phase (b); see below.
+// The same file also guards the install dialog: the `tabs` permission, which
+// Chrome shows as "Read your browsing history", must not come back by
+// accident (see FORBIDDEN_IN_MANIFEST).
 //
 // The invariant otherwise rests on three separately fragile mechanisms:
 // Vite constant-folding `import.meta.env.MODE` plus Rollup tree-shaking the
@@ -28,9 +32,27 @@ const ROOT = fileURLToPath(new URL('..', import.meta.url));
 const OUT = join(ROOT, '.output/chrome-mv3');
 
 /** Case-insensitive needles no production file may contain. */
-const FORBIDDEN_EVERYWHERE = ['searchprobe', 'search_probe'];
-/** Nothing manifest-specific is barred since phase (b); kept for the next probe. */
-const FORBIDDEN_IN_MANIFEST = [];
+const FORBIDDEN_EVERYWHERE = [
+  'searchprobe',
+  'search_probe',
+  // The tabs-permission probe (background/permprobe.ts +
+  // entrypoints/permprobe/). It drives other tabs around with tabs.update and
+  // opens third-party pages by itself; it rides the same three fragile
+  // mechanisms the search probe does, so it gets the same tripwire.
+  'permprobe',
+  'perm_probe',
+];
+/**
+ * Barred from the manifest specifically. `tabs` was removed on the strength of
+ * `npm run probe:perm` — the panel follows the active tab by id, and the two
+ * guards that needed to know whether a page was still there now read a
+ * presence port instead of a URL. It is listed here because the failure mode
+ * is silent: re-adding it costs users Chrome's "Read your browsing history"
+ * warning at install, and nothing else in the build would complain.
+ * `PROBE_WITH_TABS=1` grants it in the probe's own mode, which never builds
+ * into `.output/chrome-mv3`.
+ */
+const FORBIDDEN_IN_MANIFEST = ['"tabs"'];
 
 const failures = [];
 

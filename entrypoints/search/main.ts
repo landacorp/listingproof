@@ -40,6 +40,7 @@ import type {
   SearchFocusListingMessage,
   SearchFocusListingResponse,
 } from '../../lib/messages';
+import { PRESENCE_PORT_NAME, createPresenceClient } from '../../lib/presence';
 import { adapterById } from '../../lib/sites/registry';
 import type { SearchResultCard } from '../../lib/sites/types';
 import { addMonths, clickDay, inRange, monthMatrix, nightsBetween, type DateRange } from './rangecal';
@@ -61,6 +62,23 @@ import {
 } from './controller';
 
 const PLATFORM_ID = 'booking';
+
+/**
+ * This page's announcement to the worker (`lib/presence.ts`).
+ *
+ * A listing check publishes its verdict onto THIS tab, seconds after the
+ * click, and must not do so if the page that asked is gone — navigated away,
+ * or reloaded into a result list that no longer contains what was asked
+ * about. The worker used to establish that by reading this tab's URL, which
+ * cost the `tabs` permission and could not tell a reload from standing still.
+ * A port answers both, for nothing.
+ *
+ * Connected at load rather than lazily (the content script's rule): this page
+ * exists to talk to the worker, and the guard must already be armed by the
+ * time the first check is clicked, not racing it.
+ */
+const presence = createPresenceClient(() => browser.runtime.connect({ name: PRESENCE_PORT_NAME }));
+presence.ensure();
 
 function byId<T extends HTMLElement>(id: string): T {
   return document.getElementById(id) as T;
@@ -1035,6 +1053,10 @@ function wireCheckButton(button: HTMLButtonElement, url: string, name: string): 
     statusFlight = flight;
     void (async () => {
       try {
+        // Chrome retires the service worker eventually, which takes the port
+        // with it; re-announce before asking, so the verdict this click is
+        // about is guarded by a live one.
+        presence.ensure();
         const message: SearchFocusListingMessage = { type: 'SEARCH_FOCUS_LISTING', url };
         const response = (await browser.runtime.sendMessage(message)) as
           | SearchFocusListingResponse

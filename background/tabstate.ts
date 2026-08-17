@@ -25,12 +25,27 @@ import type { PipelineOutcome } from './pipeline';
  * better vector, not a duplicate. The superseded run itself still runs to
  * completion; cancelling it is the remaining half of the ROADMAP P1 item.
  *
- * Navigation (`dropIfNavigatedAway`): a tab that left the page its state
- * describes must not keep showing that page's verdict — the P0-1 invariant,
- * applied to the tab itself rather than to the panel. The decision lives here,
- * with the state it protects, because it needs to know what the tab is
- * currently showing; `entrypoints/background.ts` only translates Chrome's
- * `tabs.onUpdated` into "the tab is at this URL now".
+ * Navigation: a tab that left the page its state describes must not keep
+ * showing that page's verdict — the P0-1 invariant, applied to the tab itself
+ * rather than to the panel. Two signals arrive, and neither costs a
+ * permission (the pair replaced `tabs.onUpdated` + `tabs.get(id).url`, which
+ * cost the `tabs` permission and, worse, could not see a tab that left for a
+ * host the extension holds no permission for — the commonest departure there
+ * is):
+ *
+ *  - `dropForDeparture`: the page's presence port disconnected
+ *    (`lib/presence.ts`), so its DOCUMENT is gone — navigated, reloaded,
+ *    closed. Nothing to compare: whatever this tab was showing, the page that
+ *    produced it no longer exists.
+ *  - `dropIfNavigatedAway`: the page rewrote its own address without loading a
+ *    new document, and said so. Only the content script can see that, and only
+ *    from inside the page — so it is reported, not inferred, and "did that URL
+ *    change load a new document?" stops being a heuristic.
+ *
+ * Both publish `idle` as well as forgetting: dropping alone leaves the panel
+ * rendering the verdict it last received until something else makes it
+ * re-request, which is precisely the false display these paths exist to end.
+ * A closed tab (`drop`) is the exception — there is no panel showing it.
  */
 
 export interface TabStateDeps {
@@ -45,27 +60,28 @@ export interface TabStateDeps {
 export interface TabStates {
   handleListingDetected(message: ListingDetectedMessage, tabId: number): Promise<void>;
   get(tabId: number): AnalysisState | undefined;
-  /** Forget a tab entirely, so nothing outlives the visit. */
+  /**
+   * Forget a tab entirely, so nothing outlives the visit. For a tab that is
+   * GONE: no panel can be showing it, so nothing is published.
+   */
   drop(tabId: number): void;
   /**
-   * A tab is now at `url`. Forgets its state only when the tab has genuinely
-   * left the page that state describes — see `NavigationHint` for why the
-   * caller's `sameDocument` guess matters, and the implementation for what
-   * counts as "left".
+   * The page whose analysis this tab is showing has been destroyed — it
+   * navigated, reloaded, or closed, and its presence port disconnected.
+   * Forgets the state and tells the panel, which is otherwise still rendering
+   * the verdict for a page that no longer exists.
+   */
+  dropForDeparture(tabId: number): void;
+  /**
+   * A tab's page rewrote its own address to `url` WITHOUT loading a new
+   * document, and reported it. Forgets the state only when that rewrite means
+   * the page left the listing the state describes — see the implementation for
+   * what counts as "left".
    *
-   * `url === undefined` means the caller could not find out where the tab is,
+   * `url === undefined` means the caller could not say where the page is,
    * which is no evidence of anything and changes nothing.
    */
-  dropIfNavigatedAway(tabId: number, url: string | undefined, hint?: NavigationHint): void;
-}
-
-export interface NavigationHint {
-  /**
-   * True when the URL changed without loading a new document (History API,
-   * hash). Only ever used to keep state that would otherwise be dropped, so a
-   * caller that cannot tell should leave it out.
-   */
-  sameDocument?: boolean;
+  dropIfNavigatedAway(tabId: number, url: string | undefined): void;
 }
 
 /**
@@ -201,7 +217,21 @@ export function createTabStates(deps: TabStateDeps): TabStates {
   }
 
   /**
-   * Did the tab leave the page its state describes?
+   * Forget this tab's state AND say so, for a tab that still exists. Silent
+   * when there was nothing on screen: an `idle` broadcast for a tab nobody
+   * ever analysed is noise, and the panel already renders idle for it.
+   */
+  function dropForDeparture(tabId: number): void {
+    if (!state.has(tabId)) return;
+    drop(tabId);
+    // The panel keeps rendering the last STATE it received until something
+    // replaces it; without this, the verdict for the page just left would
+    // stay on screen until the user happened to switch tabs.
+    deps.sendState(tabId, { phase: 'idle' });
+  }
+
+  /**
+   * Did an in-document address rewrite leave the page its state describes?
    *
    * The naive rule — "any URL change drops the state" — is wrong on the two
    * platforms this extension exists for. Booking and Airbnb are single-page
@@ -213,49 +243,42 @@ export function createTabStates(deps: TabStateDeps): TabStates {
    *
    * So the comparison is between IDENTITIES, not URLs: the same listing under
    * a locale suffix, tracking params, a country domain or a sub-page is the
-   * same listing, and the tab has not gone anywhere.
+   * same listing, and the page has not gone anywhere.
    *
-   * What Chrome does not tell us is whether a URL change loaded a new document.
-   * `changeInfo.status` accompanies real loads and is absent from History-API
-   * rewrites, which is a heuristic, not a contract — so it is used in one
-   * direction only: to KEEP state we would otherwise drop. A stale verdict for
-   * the page the tab is still on is a small wrong; destroying a running
-   * analysis is a large one.
+   * Every URL that reaches here came from a document that is STILL RUNNING and
+   * reported its own `location` — a departure destroys the document and
+   * arrives as `dropForDeparture` instead. So "the document did not change" is
+   * a fact here, not the `changeInfo.status` guess it used to be, and the one
+   * case that turns on it is safe to decide: a listing served by the generic
+   * adapter has no URL-resolvable identity on either side of the comparison,
+   * so a rewrite there is indistinguishable from leaving. Blind and
+   * mid-flight, on a page we know is still alive: keep.
    */
-  function navigatedAway(
-    showing: AnalysisState,
-    url: string,
-    hint: NavigationHint | undefined,
-  ): boolean {
+  function navigatedAway(showing: AnalysisState, url: string): boolean {
     const shown = showing.canonicalUrl;
     const next = listingFor(url);
     // The same listing, however it is spelled now.
     if (next !== null && next === shown) return false;
-    // A different listing: the tab moved, and its own content script is about
+    // A different listing: the page moved, and its own content script is about
     // to report the new one.
     if (next !== null) return true;
-    // Not a listing URL at all. Usually that is exactly what it looks like —
-    // the tab left for a search page, a login wall, somewhere else entirely —
-    // but a listing served by the generic adapter has no URL-resolvable
-    // identity to compare against either, so a same-document rewrite there is
-    // indistinguishable from leaving. Blind and mid-flight: keep.
-    if (hint?.sameDocument === true && (shown === undefined || listingFor(shown) === null)) {
-      return false;
-    }
-    return true;
+    // Not a listing URL at all — a search page, a login wall, somewhere else
+    // entirely — unless neither side resolves, which is the blind case above.
+    return shown !== undefined && listingFor(shown) !== null;
   }
 
   return {
     handleListingDetected,
     get: (tabId) => state.get(tabId),
     drop,
-    dropIfNavigatedAway: (tabId, url, hint) => {
+    dropForDeparture,
+    dropIfNavigatedAway: (tabId, url) => {
       if (url === undefined) return;
       const showing = state.get(tabId);
       // Nothing on screen for this tab, so nothing can be wrong about it.
       if (showing === undefined) return;
-      if (!navigatedAway(showing, url, hint)) return;
-      drop(tabId);
+      if (!navigatedAway(showing, url)) return;
+      dropForDeparture(tabId);
     },
   };
 }

@@ -7,7 +7,9 @@ import { analyzeFirstPass, refineWithLlm } from '../background/pipeline';
 import { createSettingsStore } from '../background/settings';
 import { createTabStates } from '../background/tabstate';
 import { registerSearchProbe } from '../background/searchprobe';
+import { registerPermProbe } from '../background/permprobe';
 import { createGeocodeCache, purgeRetiredCaches } from '../background/storage';
+import { PRESENCE_PORT_NAME, createPresenceRegistry } from '../lib/presence';
 import type { ExtensionMessage } from '../lib/messages';
 import type { ParseListingHtmlResponse } from './offscreen/main';
 
@@ -84,6 +86,16 @@ function isExtensionPageSender(senderUrl: string | undefined): boolean {
   return senderUrl !== undefined && senderUrl.startsWith(browser.runtime.getURL('/'));
 }
 
+/**
+ * Which page is currently connected from each tab (`lib/presence.ts`).
+ *
+ * This is how the worker knows a page is gone WITHOUT the `tabs` permission —
+ * the one Chrome renders to the user as "Read your browsing history". It feeds
+ * both guards that used to read `Tab.url`: the focus-check publish target and
+ * the navigation drop below.
+ */
+const presence = createPresenceRegistry();
+
 const geocoder = createNominatimGeocoder({ cache: createGeocodeCache() });
 const settingsStore = createSettingsStore();
 // One instance so the search rate limit is global to the worker — a handler
@@ -124,9 +136,10 @@ const focusListing = createFocusListingHandler({
   parseListingHtml: parseListingHtmlOffscreen,
   onListingDetected: (detected, tabId) => tabs.handleListingDetected(detected, tabId),
   // A check takes seconds and publishes onto the search tab. This is how that
-  // path knows the tab is still the page that asked — a closed tab rejects,
-  // which the handler reads as "gone" and publishes nothing.
-  tabUrl: async (tabId) => (await browser.tabs.get(tabId)).url,
+  // path knows the page that asked is still there — a page that navigated
+  // away, closed, or reloaded has no port, or a different one, and the handler
+  // reads either as "gone" and publishes nothing.
+  askerToken: (tabId) => presence.token(tabId),
 });
 
 export default defineBackground(() => {
@@ -137,6 +150,18 @@ export default defineBackground(() => {
     registerSearchProbe();
     browser.runtime.onInstalled.addListener(() => {
       void browser.tabs.create({ url: `${browser.runtime.getURL('/searchprobe.html')}?auto=1` });
+    });
+  }
+
+  // The `tabs`-permission probe, same shape and the same one-mode gate: under
+  // `npm run probe:perm` only, measure what a worker holding no `tabs`
+  // permission can actually see of a tab. Production builds contain neither
+  // branch (MODE is statically replaced), and
+  // `scripts/assert-probe-free.mjs` proves it after every build.
+  if (import.meta.env.MODE === 'perm-probe') {
+    registerPermProbe();
+    browser.runtime.onInstalled.addListener(() => {
+      void browser.tabs.create({ url: `${browser.runtime.getURL('/permprobe.html')}?auto=1` });
     });
   }
 
@@ -166,6 +191,15 @@ export default defineBackground(() => {
           void tabs.handleListingDetected(message, tabId);
           return undefined;
         }
+        case 'PAGE_MOVED': {
+          // The page rewrote its own address without loading a new document.
+          // Only a real tab's page may say so, and it only ever speaks about
+          // itself: the id is the browser's, not the message's.
+          const tabId = sender.tab?.id;
+          if (tabId === undefined) return undefined;
+          tabs.dropIfNavigatedAway(tabId, message.url);
+          return undefined;
+        }
         case 'REQUEST_STATE': {
           // The explicit-tab path answers synchronously: the response is
           // sent before any broadcast published after the request arrived,
@@ -181,7 +215,9 @@ export default defineBackground(() => {
           }
           // The panel could not resolve its own active tab. Answer for the
           // focused window's, and say which tab that was so the panel can
-          // adopt it and stop dropping broadcasts about it.
+          // adopt it and stop dropping broadcasts about it. Its id is all
+          // this reads — see the same query in `sidepanel/main.ts` for why
+          // that matters and why `tab.url` must not creep in here.
           void (async () => {
             const [active] = await browser.tabs.query({ active: true, currentWindow: true });
             const current = active?.id === undefined ? undefined : tabs.get(active.id);
@@ -224,44 +260,39 @@ export default defineBackground(() => {
   );
 
   // Drop per-tab state when the tab goes away, so nothing outlives the visit.
+  // (`tabs.onRemoved` needs no permission — it carries an id and nothing else.)
   browser.tabs.onRemoved.addListener((tabId: number) => tabs.drop(tabId));
 
-  // ...and when the tab navigates elsewhere, for the same reason P0-1 existed:
-  // a panel must never show a verdict for something the tab is not. The
-  // focus-check path publishes a listing's analysis as the SEARCH tab's state
-  // by design, and that state would otherwise survive the tab navigating away
-  // from the search page entirely.
+  // ...and when the page that state describes is destroyed, for the same
+  // reason P0-1 existed: a panel must never show a verdict for something the
+  // tab is not. This is the half a URL could never do well and the `tabs`
+  // permission could not do at all — a tab that leaves a listing for a host
+  // this extension holds no permission for reports no URL to `tabs.onUpdated`
+  // even with `tabs` granted, and that is the commonest departure there is.
   //
-  // "Navigated elsewhere" is the whole difficulty, and it is decided in
-  // `tabstate.ts` where the tab's current verdict lives — this listener only
-  // reports where the tab is. Two shapes arrive here:
-  //
-  //  - `changeInfo.url`: the address changed. Chrome does not say whether a new
-  //    document loaded, but it does attach `status` to the events that belong
-  //    to a real load, so its absence is (heuristically) a History-API rewrite —
-  //    passed along as a hint that only ever protects state, never drops it.
-  //  - `status: 'loading'` with no url: a reload, or a load whose URL Chrome
-  //    reported separately. A reload of a real listing page is harmless (the
-  //    content script re-reports), but a reload of the SEARCH page leaves a
-  //    focus-check verdict on screen for results that no longer exist — so ask
-  //    the tab where it is and run the same comparison.
-  browser.tabs.onUpdated.addListener(
-    (tabId: number, changeInfo: { url?: string; status?: string }) => {
-      if (changeInfo.url !== undefined) {
-        tabs.dropIfNavigatedAway(tabId, changeInfo.url, {
-          sameDocument: changeInfo.status === undefined,
-        });
-        return;
-      }
-      if (changeInfo.status !== 'loading') return;
-      const before = tabs.get(tabId);
-      if (before === undefined) return;
-      void browser.tabs.get(tabId).then((tab: { url?: string }) => {
-        // A fresh report can land while that lookup is out; it owns the tab now
-        // and its state is about the page that is actually loading.
-        if (tabs.get(tabId) !== before) return;
-        tabs.dropIfNavigatedAway(tabId, tab.url);
-      }, () => {});
-    },
-  );
+  // Every page that can own per-tab state opens a presence port: the listing
+  // content script, and the map search page whose tab a focus check publishes
+  // onto. Chrome disconnects it when the document goes — navigated, reloaded,
+  // closed, crashed — so "gone" arrives as a fact from the renderer instead of
+  // a comparison the worker has to infer.
+  browser.runtime.onConnect.addListener((port: {
+    name: string;
+    sender?: { tab?: { id?: number } };
+    onDisconnect: { addListener(listener: () => void): void };
+  }) => {
+    if (port.name !== PRESENCE_PORT_NAME) return;
+    // No tab means no per-tab state to guard (the side panel and the options
+    // page have no `sender.tab`). Browser-filled, so it cannot be spoofed by
+    // the attacker-authored page the content script runs in.
+    const tabId = port.sender?.tab?.id;
+    if (tabId === undefined) return;
+    const token = presence.arrived(tabId);
+    port.onDisconnect.addListener(() => {
+      // False when a newer document already claimed this tab, which is what a
+      // full-page navigation looks like when the new page's connect beats the
+      // old page's disconnect. Its state is about the page that is there now.
+      if (!presence.left(tabId, token)) return;
+      tabs.dropForDeparture(tabId);
+    });
+  });
 });

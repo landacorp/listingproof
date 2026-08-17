@@ -102,8 +102,15 @@ extension, or via your browser's "clear data" controls for it.
 | `storage` | To cache geocodes locally, and to keep your settings |
 | `sidePanel` | To show the verdict |
 | `offscreen` | To parse the one kind of HTML the extension fetches itself — a listing page you asked it to check from the map page — safely, away from any live page |
-| `tabs` | To show the verdict for the tab you are actually looking at |
 | Access to the OpenStreetMap and localhost hosts above | To make the checks described above |
+
+The extension does **not** ask for the `tabs` permission, which your browser
+describes as "read your browsing history". It shows the verdict for the tab you
+are looking at by following that tab's *number*, which needs no permission, and
+it learns that a page has gone by the page's own connection to the extension
+ending — never by reading the address of a tab. It cannot see the addresses of
+your other tabs, and it cannot see where a tab goes when it leaves one of the
+listing sites listed above.
 
 ## Children
 

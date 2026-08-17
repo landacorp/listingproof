@@ -101,7 +101,7 @@ function makeHandler(
     parse?: (html: string, canonicalUrl: string) => Promise<ParsedListing | null>;
     onDetected?: (message: ListingDetectedMessage, tabId: number) => void | Promise<void>;
     maxInFlight?: number;
-    tabUrl?: (tabId: number) => Promise<string | undefined>;
+    askerToken?: (tabId: number) => number | undefined;
   } = {},
 ) {
   const { fetchImpl, calls } = fakeFetch(overrides.respond ?? (() => new Response(listingBody())));
@@ -121,7 +121,7 @@ function makeHandler(
     parseListingHtml,
     onListingDetected,
     ...(overrides.maxInFlight === undefined ? {} : { maxInFlightPerTab: overrides.maxInFlight }),
-    ...(overrides.tabUrl === undefined ? {} : { tabUrl: overrides.tabUrl }),
+    ...(overrides.askerToken === undefined ? {} : { askerToken: overrides.askerToken }),
   });
   return { handler, calls, parseListingHtml, onListingDetected };
 }
@@ -522,24 +522,47 @@ describe('focus-listing burst control', () => {
 // Publishing onto the tab that actually asked
 // ---------------------------------------------------------------------------
 
-/** Where the search page lives — an extension page, not any listing. */
-const SEARCH_PAGE = 'chrome-extension://abcdef/search.html';
-
+/**
+ * The asking page is identified by its presence token (`lib/presence.ts`) — the
+ * search page's own `runtime.connect` port — and NOT by the tab's URL, which
+ * would cost the `tabs` permission. `askerToken` here stands in for the
+ * worker's registry: a number while that document is connected, a DIFFERENT
+ * number once a later document owns the tab, undefined when none does.
+ */
 describe('focus-listing publish target', () => {
-  it('publishes nothing when the tab left the page that asked', async () => {
+  /** A presence source a test can move, the way a real navigation would. */
+  function presence(initial: number | undefined) {
+    let token = initial;
+    return {
+      askerToken: () => token,
+      /** The page went and nothing replaced it: closed tab, navigated away. */
+      departed: () => (token = undefined),
+      /** A new document owns the tab: a reload, or a return to this page. */
+      replaced: (next: number) => (token = next),
+    };
+  }
+
+  /** A handler whose fetch is held open until the test lets it finish. */
+  function inFlightHandler(askerToken: () => number | undefined) {
     const gate = deferred();
-    let where: string | undefined = SEARCH_PAGE;
-    const { handler, onListingDetected } = makeHandler({
-      tabUrl: async () => where,
+    const made = makeHandler({
+      askerToken,
       respond: async () => {
         await gate.promise;
         return new Response(listingBody());
       },
     });
+    return { ...made, gate };
+  }
+
+  it('publishes nothing when the page that asked has gone', async () => {
+    const page = presence(1);
+    const { handler, onListingDetected, gate } = inFlightHandler(page.askerToken);
 
     const flight = handler.handle(focusMessage(), TAB_ID);
-    // While the check is in the air the user opens the listing in this tab.
-    where = CANONICAL.canonicalUrl;
+    // While the check is in the air the user opens the listing in this tab —
+    // the search document is destroyed and its port disconnects.
+    page.departed();
     gate.resolve();
 
     // Accepted, then abandoned — silence, not an error: the asker is gone.
@@ -547,59 +570,60 @@ describe('focus-listing publish target', () => {
     expect(onListingDetected).not.toHaveBeenCalled();
   });
 
-  it('publishes nothing when the tab is gone entirely', async () => {
-    const gate = deferred();
-    let closed = false;
-    const { handler, onListingDetected } = makeHandler({
-      tabUrl: async () => {
-        if (closed) throw new Error('No tab with id: 7');
-        return SEARCH_PAGE;
-      },
-      respond: async () => {
-        await gate.promise;
-        return new Response(listingBody());
-      },
-    });
+  it('publishes nothing when the search page was RELOADED — the case a URL could not catch', async () => {
+    const page = presence(1);
+    const { handler, onListingDetected, gate } = inFlightHandler(page.askerToken);
 
     const flight = handler.handle(focusMessage(), TAB_ID);
-    closed = true;
+    // Same tab, same URL, different document: the result list this verdict
+    // was about no longer exists, so the verdict must not land on it. The
+    // URL comparison this replaced called that "still the asking page".
+    page.replaced(2);
     gate.resolve();
 
     expect(await flight).toEqual({ ok: true });
     expect(onListingDetected).not.toHaveBeenCalled();
   });
 
-  it('publishes when the tab is still the page that asked', async () => {
-    const { handler, onListingDetected } = makeHandler({ tabUrl: async () => SEARCH_PAGE });
+  it('publishes when the page that asked is still there', async () => {
+    const { handler, onListingDetected } = makeHandler({ askerToken: () => 1 });
 
     expect(await handler.handle(focusMessage(), TAB_ID)).toEqual({ ok: true });
     expect(onListingDetected).toHaveBeenCalledTimes(1);
   });
 
-  it('a URL respelled in place is still the page that asked', async () => {
-    const gate = deferred();
-    let where = 'https://stub.example/hotel/z.html';
-    const { handler, onListingDetected } = makeHandler({
-      tabUrl: async () => where,
-      respond: async () => {
-        await gate.promise;
-        return new Response(listingBody());
-      },
-    });
+  it('a page that merely rewrites its own address is still the page that asked', async () => {
+    // The search page rewriting its URL in place keeps one document, so it
+    // keeps one port and one token — no URL parsing needed to know that.
+    const page = presence(1);
+    const { handler, onListingDetected, gate } = inFlightHandler(page.askerToken);
 
     const flight = handler.handle(focusMessage(), TAB_ID);
-    // Same page, new spelling — tracking params, a locale, a hash.
-    where = 'https://stub.example/hotel/z.html?lang=de#photos';
     gate.resolve();
 
     expect(await flight).toEqual({ ok: true });
     expect(onListingDetected).toHaveBeenCalledTimes(1);
   });
 
-  it('publishes when the tab cannot be located: an unknown must not silence a verdict', async () => {
-    const { handler, onListingDetected } = makeHandler({ tabUrl: async () => undefined });
+  it('publishes when the asker cannot be identified: an unknown must not silence a verdict', async () => {
+    const { handler, onListingDetected } = makeHandler({ askerToken: () => undefined });
 
     expect(await handler.handle(focusMessage(), TAB_ID)).toEqual({ ok: true });
+    expect(onListingDetected).toHaveBeenCalledTimes(1);
+  });
+
+  it('publishes when a page connects only after the request was accepted', async () => {
+    // Unknown at accept time stays unknown: a port that appears mid-flight is
+    // not evidence that the page which asked is still there, and the rule is
+    // that an unknown never suppresses a verdict the user is waiting for.
+    const page = presence(undefined);
+    const { handler, onListingDetected, gate } = inFlightHandler(page.askerToken);
+
+    const flight = handler.handle(focusMessage(), TAB_ID);
+    page.replaced(9);
+    gate.resolve();
+
+    expect(await flight).toEqual({ ok: true });
     expect(onListingDetected).toHaveBeenCalledTimes(1);
   });
 });

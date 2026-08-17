@@ -1,6 +1,6 @@
 {
   "name": "listingproof",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "private": false,
   "type": "module",
   "scripts": {
@@ -9,6 +9,7 @@
     "test": "vitest run",
     "postinstall": "wxt prepare",
     "probe:search": "wxt --mode search-probe",
+    "probe:perm": "wxt --mode perm-probe",
     "zip": "wxt zip && node scripts/assert-probe-free.mjs",
     "typecheck": "tsc --noEmit",
     "generate": "vite-node scripts/make-synthetic.ts && vite-node scripts/make-injection.ts && vite-node scripts/make-icons.ts",

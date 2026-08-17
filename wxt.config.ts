@@ -11,16 +11,48 @@ import { BOOKING_SEARCH_RESULTS_PATTERN, LISTING_MATCH_PATTERNS } from './lib/si
  */
 const SEARCH_PROBE_MODE = 'search-probe';
 
+/**
+ * Permission probe: `npm run probe:perm` (= `wxt --mode perm-probe`), same
+ * one-mode gate as above. It measures what a worker holding no `tabs`
+ * permission can still see of a tab — see `background/permprobe.ts`.
+ * `PROBE_WITH_TABS=1 npm run probe:perm` builds the identical probe WITH the
+ * permission, which is the control that makes a blank field evidence.
+ */
+const PERM_PROBE_MODE = 'perm-probe';
+
+/** Probe entrypoints and the one mode each is allowed to exist in. */
+const PROBE_MODES: Record<string, string> = {
+  searchprobe: SEARCH_PROBE_MODE,
+  permprobe: PERM_PROBE_MODE,
+};
+
 export default defineConfig({
   hooks: {
     // WXT 0.20 has no per-entrypoint mode gate (include/exclude filter by
-    // browser only), so the probe page is skipped here for every mode except
-    // its own. The "skipped" warning WXT logs on normal builds is expected.
+    // browser only), so a probe page is skipped here for every mode except its
+    // own. The "skipped" warning WXT logs on normal builds is expected.
     'entrypoints:resolved': (wxt, entrypoints) => {
-      if (wxt.config.mode === SEARCH_PROBE_MODE) return;
       for (const entrypoint of entrypoints) {
-        if (entrypoint.name === 'searchprobe') entrypoint.skipped = true;
+        const probeMode = PROBE_MODES[entrypoint.name];
+        if (probeMode !== undefined && wxt.config.mode !== probeMode) entrypoint.skipped = true;
       }
+    },
+    /**
+     * The permission probe runs on a DEV build (that is the only way to launch
+     * a browser with the extension in it), and WXT's dev build adds `tabs` to
+     * the manifest for its own extension-reload client. The first probe run
+     * caught that only because the report prints the manifest it actually ran
+     * under — otherwise it would have measured a permission it was supposed to
+     * be measuring the absence of, and reported a clean pass.
+     *
+     * So take it back out for the probe's own mode. Left alone everywhere else:
+     * production never had it, and `npm run dev` still needs WXT's reloading.
+     */
+    'build:manifestGenerated': (wxt, manifest) => {
+      if (wxt.config.mode !== PERM_PROBE_MODE || process.env.PROBE_WITH_TABS === '1') return;
+      manifest.permissions = (manifest.permissions ?? []).filter(
+        (permission) => permission !== 'tabs',
+      );
     },
   },
   manifest: (env) => ({
@@ -45,10 +77,32 @@ export default defineConfig({
     // `offscreen` gives the service worker a DOMParser for the listing pages it
     // fetches itself — the map search page's "check this result without opening
     // it" path — since MV3 workers have none;
-    // `tabs` lets the panel know which listing the active tab is showing;
     // `scripting` lets the options page register the content script on sites
     // the user grants at runtime.
-    permissions: ['storage', 'sidePanel', 'offscreen', 'tabs', 'scripting'],
+    //
+    // `tabs` is deliberately NOT here. Chrome shows it to the user as "Read
+    // your browsing history", which is the loudest line an install dialog can
+    // carry and an unreasonable price for what it actually bought: two guards
+    // that needed to know whether the page behind a verdict was still there.
+    // Both now learn that from a `runtime.connect` port the page itself holds
+    // (`lib/presence.ts`) and from the content script reporting its own
+    // `location` — neither of which needs a permission, and both of which see
+    // MORE than `Tab.url` could (a reload; a departure to a host no permission
+    // covers). The rest of the `chrome.tabs` surface this extension uses —
+    // `query` for ids and window ids, `onActivated`, `onRemoved`, `create`,
+    // `sendMessage` — never required the permission; `npm run probe:perm`
+    // measures that in a real browser rather than trusting the documentation.
+    permissions: [
+      'storage',
+      'sidePanel',
+      'offscreen',
+      'scripting',
+      // The probe's CONTROL run only, never a build anyone ships:
+      // `PROBE_WITH_TABS=1 npm run probe:perm` grants the permission so the
+      // ordinary run's blank fields can be attributed to its absence rather
+      // than to a broken probe.
+      ...(env.mode === PERM_PROBE_MODE && process.env.PROBE_WITH_TABS === '1' ? ['tabs'] : []),
+    ],
     // The pool user grants draw from — nothing here is requested at install
     // (optional permissions carry no install warning). The generic schema.org
     // adapter only ever runs on a site after the user names it on the options

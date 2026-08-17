@@ -6,6 +6,8 @@ dist/
 # Store submission artefact produced by `npm run zip`
 *.zip
 
+probe-out/
+
 # Editor / OS noise
 .DS_Store
 .idea/

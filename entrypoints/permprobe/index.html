@@ -1,0 +1,74 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>ListingProof — tabs-permission probe</title>
+    <style>
+      body {
+        margin: 0;
+        padding: 16px;
+        background: #101216;
+        color: #e8eaef;
+        font: 14px/1.5 -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      }
+      h1 { font-size: 14px; text-transform: uppercase; letter-spacing: 0.06em; color: #9aa0ae; }
+      h2 { font-size: 12px; text-transform: uppercase; letter-spacing: 0.06em; color: #9aa0ae; margin-top: 22px; }
+      table { border-collapse: collapse; width: 100%; margin-top: 12px; }
+      th, td { text-align: left; padding: 6px 10px; border-bottom: 1px solid #2a2d35; vertical-align: top; }
+      th { color: #9aa0ae; font-weight: 600; }
+      td.url { font-family: ui-monospace, monospace; font-size: 12px; word-break: break-all; }
+      .visible { color: #57d98a; }
+      .blank { color: #f0c674; }
+      .error { color: #ff7a72; }
+      #log { margin-top: 14px; color: #9aa0ae; white-space: pre-wrap; font-family: ui-monospace, monospace; font-size: 12px; }
+      button { background: #1c1f26; color: inherit; border: 1px solid #3a3e48; border-radius: 8px; padding: 6px 12px; cursor: pointer; }
+      code { color: #cbd0da; }
+    </style>
+  </head>
+  <body>
+    <h1>tabs-permission probe — dev only, never shipped</h1>
+    <p>
+      With <code>tabs</code> removed from the manifest, what can the service worker still see of a
+      tab? Opens a permitted listing page, navigates it to another listing and then to an
+      unpermitted host, and opens the extension's own search page — reading
+      <code>tabs.get</code> and recording every <code>tabs.onUpdated</code> delivery, plus every
+      presence-port connect/disconnect (the replacement guard's signal).
+    </p>
+    <p>
+      Open with <code>?auto=1</code> (the worker does this when launched via
+      <code>npm run probe:perm</code>) or press Run. Re-run the whole thing with
+      <code>PROBE_WITH_TABS=1</code> to get the control: the same measurements with the permission
+      granted. Artifacts are POSTed to the capture server on <code>127.0.0.1:8787</code> if it is
+      running — use <code>OUT_DIR=probe-out</code> so they land outside the fixture corpus.
+    </p>
+    <button id="run">Run probe</button>
+    <div id="verdict"></div>
+
+    <h2>tabs.get / tabs.query</h2>
+    <table hidden id="steps-table">
+      <thead>
+        <tr><th>step</th><th>url visible?</th><th>url</th><th>ids</th><th>note</th></tr>
+      </thead>
+      <tbody id="steps"></tbody>
+    </table>
+
+    <h2>tabs.onUpdated deliveries</h2>
+    <table hidden id="updates-table">
+      <thead>
+        <tr><th>during step</th><th>tab</th><th>changeInfo keys</th><th>changeInfo.url</th></tr>
+      </thead>
+      <tbody id="updates"></tbody>
+    </table>
+
+    <h2>presence ports (the replacement)</h2>
+    <table hidden id="ports-table">
+      <thead>
+        <tr><th>during step</th><th>event</th><th>tab</th><th>sender.url</th></tr>
+      </thead>
+      <tbody id="ports"></tbody>
+    </table>
+
+    <div id="log"></div>
+    <script type="module" src="./main.ts"></script>
+  </body>
+</html>

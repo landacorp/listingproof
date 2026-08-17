@@ -321,14 +321,89 @@ describe('navigation', () => {
     return { tabs, analyses, sent, handling };
   }
 
+  // -------------------------------------------------------------------------
+  // Departure: the page's presence port disconnected, so its document is gone.
+  // No URL is read anywhere on this path — that is the whole point of it.
+  // -------------------------------------------------------------------------
+
+  it('forgets a departed page AND tells the panel, so no verdict outlives its page', () => {
+    const { tabs, sent } = showing();
+
+    tabs.dropForDeparture(7);
+
+    expect(tabs.get(7)).toBeUndefined();
+    // Dropping alone is not enough: the panel renders the last STATE it was
+    // sent until something replaces it, so the verdict for the page just left
+    // would sit on screen until the user happened to switch tabs.
+    expect(phasesOf(sent)).toEqual([`checking:${A_URL}`, 'idle:']);
+    expect(sent.at(-1)!.tabId).toBe(7);
+  });
+
+  it('says nothing about a tab that was never showing anything', () => {
+    const { deps } = makeDeps();
+    const tabs = createTabStates(deps);
+    tabs.dropForDeparture(99);
+    expect(deps.sendState).not.toHaveBeenCalled();
+  });
+
+  it('a departed tab publishes nothing further, however far its analysis had got', async () => {
+    const { tabs, analyses, sent, handling } = showing();
+    tabs.dropForDeparture(7);
+    analyses[0]!.resolve(scored('RED'));
+    await handling;
+
+    expect(phasesOf(sent)).toEqual([`checking:${A_URL}`, 'idle:']);
+    expect(tabs.get(7)).toBeUndefined();
+  });
+
+  it("drops the search tab's focus-check verdict when that page goes", () => {
+    // The one state whose canonicalUrl was never the tab's own URL: a listing
+    // checked from the map search page. A RELOAD of that page leaves the
+    // verdict standing over a result list that no longer exists — and a reload
+    // is a URL that did not change, which is exactly what the old
+    // `tabs.onUpdated` guard could not see. A new document is a new port.
+    const { tabs, sent } = showing();
+    tabs.dropForDeparture(7);
+    expect(tabs.get(7)).toBeUndefined();
+    expect(sent.at(-1)!.state.phase).toBe('idle');
+  });
+
+  it('leaves other tabs alone', async () => {
+    const { deps, analyses, sent } = makeDeps();
+    const tabs = createTabStates(deps);
+    const seven = tabs.handleListingDetected(LISTING_A, 7);
+    const eight = tabs.handleListingDetected(LISTING_B, 8);
+    analyses[0]!.resolve(scored('RED'));
+    analyses[1]!.resolve(scored('GREEN'));
+    await Promise.all([seven, eight]);
+
+    tabs.dropForDeparture(7);
+
+    expect(tabs.get(7)).toBeUndefined();
+    expect(tabs.get(8)?.result?.verdict).toBe('GREEN');
+    expect(sent.filter(({ tabId }) => tabId === 8).at(-1)!.state.phase).toBe('done');
+  });
+
+  it('catches a generic-adapter page that really leaves, which no URL comparison could', () => {
+    // The blind case below KEEPS state, because two unresolvable URLs prove
+    // nothing. That is only safe because a page that genuinely goes is caught
+    // here instead — by its document ending, not by its address.
+    const { tabs } = showing(GENERIC_LISTING);
+    tabs.dropForDeparture(7);
+    expect(tabs.get(7)).toBeUndefined();
+  });
+
+  // -------------------------------------------------------------------------
+  // In-document navigation: the page rewrote its own address and said so.
+  // Only the content script can see this, and it reports it as a fact.
+  // -------------------------------------------------------------------------
+
   it('keeps the running analysis when the SPA rewrites the URL of the same listing', async () => {
     const { tabs, analyses, sent, handling } = showing();
 
     // Locale suffix, tracking params and a gallery hash — Booking standing
     // still while its address bar moves.
-    tabs.dropIfNavigatedAway(7, `${A_URL.replace('.html', '.fr.html')}?aid=9#gallery`, {
-      sameDocument: true,
-    });
+    tabs.dropIfNavigatedAway(7, `${A_URL.replace('.html', '.fr.html')}?aid=9#gallery`);
     expect(tabs.get(7)?.phase).toBe('checking');
 
     // …and the verdict still lands: the run was never orphaned.
@@ -341,72 +416,59 @@ describe('navigation', () => {
   it('keeps state for a platform sub-page of the listing (the photo viewer)', () => {
     const { tabs } = showing(ROOM_LISTING);
 
-    // No adapter claims `/rooms/<id>/photos` as a listing page, but the tab
+    // No adapter claims `/rooms/<id>/photos` as a listing page, but the page
     // has not left the listing — and a country domain is not a move either.
-    tabs.dropIfNavigatedAway(7, 'https://www.airbnb.fr/rooms/12345/photos', {
-      sameDocument: true,
-    });
+    tabs.dropIfNavigatedAway(7, 'https://www.airbnb.fr/rooms/12345/photos');
 
     expect(tabs.get(7)?.phase).toBe('checking');
   });
 
   it('drops when the SPA moves to a DIFFERENT listing', () => {
-    const { tabs } = showing();
-    tabs.dropIfNavigatedAway(7, LISTING_B.canonical!.canonicalUrl, { sameDocument: true });
+    const { tabs, sent } = showing();
+    tabs.dropIfNavigatedAway(7, LISTING_B.canonical!.canonicalUrl);
     expect(tabs.get(7)).toBeUndefined();
+    expect(sent.at(-1)!.state.phase).toBe('idle');
   });
 
-  it('drops when the tab leaves for a page that is no listing at all', () => {
-    const loaded = showing();
-    loaded.tabs.dropIfNavigatedAway(7, 'https://www.booking.com/searchresults.html?dest=paris');
-    expect(loaded.tabs.get(7)).toBeUndefined();
-
-    // Same in-document, which is how Airbnb goes back to its search results.
+  it('drops when the SPA leaves for a page that is no listing at all', () => {
+    // How Airbnb goes back to its own search results: one document, new URL,
+    // no content-script report to supersede the verdict on screen.
     const spa = showing(ROOM_LISTING);
-    spa.tabs.dropIfNavigatedAway(7, 'https://www.airbnb.com/s/Paris/homes', { sameDocument: true });
+    spa.tabs.dropIfNavigatedAway(7, 'https://www.airbnb.com/s/Paris/homes');
     expect(spa.tabs.get(7)).toBeUndefined();
-  });
 
-  it("drops the search tab's focus-check verdict when the tab reloads or leaves", () => {
-    // The one state whose canonicalUrl was never the tab's own URL: a listing
-    // checked from the search page. A reload leaves it showing a verdict for
-    // results that no longer exist.
-    const { tabs } = showing();
-    tabs.dropIfNavigatedAway(7, 'chrome-extension://abcdef/search.html');
-    expect(tabs.get(7)).toBeUndefined();
+    const booking = showing();
+    booking.tabs.dropIfNavigatedAway(7, 'https://www.booking.com/searchresults.html?dest=paris');
+    expect(booking.tabs.get(7)).toBeUndefined();
   });
 
   it('keeps a generic-adapter page rewriting its own URL — blind, so it keeps', () => {
     const { tabs } = showing(GENERIC_LISTING);
 
     // Neither side resolves to a listing identity here, so "moved" cannot be
-    // established; killing a running analysis on a guess is the worse error.
-    tabs.dropIfNavigatedAway(7, `${GENERIC_URL}?nuitees=2`, { sameDocument: true });
+    // established. The report proves the document is still alive (a departure
+    // would have arrived as `dropForDeparture` instead), so killing a running
+    // analysis on the guess is the worse error.
+    tabs.dropIfNavigatedAway(7, `${GENERIC_URL}?nuitees=2`);
 
     expect(tabs.get(7)?.phase).toBe('checking');
   });
 
-  it('drops a generic-adapter page on a real document load elsewhere', () => {
-    const { tabs } = showing(GENERIC_LISTING);
-    tabs.dropIfNavigatedAway(7, 'https://chambres-du-lac.example/contact');
-    expect(tabs.get(7)).toBeUndefined();
-  });
-
-  it('changes nothing when the tab’s location is unknown, or when nothing is on screen', () => {
+  it('changes nothing when the page’s location is unknown, or when nothing is on screen', () => {
     const { tabs } = showing();
-    tabs.dropIfNavigatedAway(7, undefined, { sameDocument: true });
+    tabs.dropIfNavigatedAway(7, undefined);
     expect(tabs.get(7)?.phase).toBe('checking');
     // A tab with no state cannot be showing anything wrong.
     expect(() => tabs.dropIfNavigatedAway(99, 'https://example.com/')).not.toThrow();
   });
 
-  it('a dropped tab publishes nothing further', async () => {
+  it('a tab dropped by an in-document move publishes nothing further', async () => {
     const { tabs, analyses, sent, handling } = showing();
     tabs.dropIfNavigatedAway(7, 'https://www.example.com/');
     analyses[0]!.resolve(scored('RED'));
     await handling;
 
-    expect(phasesOf(sent)).toEqual([`checking:${A_URL}`]);
+    expect(phasesOf(sent)).toEqual([`checking:${A_URL}`, 'idle:']);
     expect(tabs.get(7)).toBeUndefined();
   });
 });

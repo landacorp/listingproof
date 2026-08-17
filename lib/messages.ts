@@ -7,6 +7,9 @@
  *   side panel      --REREPORT----------> content script  (the worker was
  *       evicted and its per-tab state died with it — ask the page to report
  *       itself again rather than dead-ending at "idle")
+ *   content script  --PAGE_MOVED--------> service worker  (the page rewrote its
+ *       own address without loading a new document; the worker drops the tab's
+ *       verdict if that rewrite left the listing it describes)
  *   search page     --SEARCH_AREA_FETCH-> service worker  (carries a QUERY,
  *       never a URL; the worker spells the URL via the site adapter and
  *       returns raw HTML for the page to parse)
@@ -155,6 +158,30 @@ export interface RereportMessage {
 }
 
 /**
+ * Content script → service worker: the page rewrote its own address without
+ * loading a new document (a single-page-app navigation, a hash, a History-API
+ * push), and this is where it is now.
+ *
+ * The page is the only context that can see this for free. The worker used to
+ * learn it from `tabs.onUpdated`, which costs the `tabs` permission — Chrome's
+ * "Read your browsing history" — and still could not see a tab that had moved
+ * to a host the extension holds no permission for. A document reporting its
+ * own `location` needs nothing, and is authoritative about the one thing
+ * `tabs.onUpdated` could only guess at: that no new document loaded.
+ *
+ * A page can only ever move its OWN tab's state, and only in the direction of
+ * forgetting it — the tab id comes from `sender.tab.id`, which the browser
+ * fills in, and the worker's only response is to drop state or do nothing. A
+ * hostile listing page can already suppress its own verdict by refusing to
+ * extract, so this adds no leverage.
+ */
+export interface PageMovedMessage {
+  type: 'PAGE_MOVED';
+  /** The page's current `location.href`. */
+  url: string;
+}
+
+/**
  * Search page → service worker: fetch one page of search results for a
  * validated area query. The message carries a QUERY, never a URL — the
  * worker spells the URL itself via the adapter's `buildSearchUrl`, so a
@@ -214,6 +241,7 @@ export type ExtensionMessage =
   | RequestStateMessage
   | StateMessage
   | RereportMessage
+  | PageMovedMessage
   | SearchAreaFetchMessage
   | SearchFocusListingMessage
   | ParseListingHtmlMessage;

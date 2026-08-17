@@ -3,7 +3,8 @@ import { adapterForDocument } from '../lib/sites/registry';
 import { LISTING_MATCH_PATTERNS } from '../lib/sites/patterns';
 import { createReportGate, reportFingerprint } from '../lib/reportgate';
 import { createSettleScheduler } from '../lib/settle';
-import type { ExtensionMessage, ListingDetectedMessage } from '../lib/messages';
+import { PRESENCE_PORT_NAME, createPresenceClient } from '../lib/presence';
+import type { ExtensionMessage, ListingDetectedMessage, PageMovedMessage } from '../lib/messages';
 
 /** Quiet period after the last DOM mutation before re-reading the page. */
 const SETTLE_MS = 400;
@@ -36,6 +37,15 @@ const MAX_WAIT_MS = 2500;
  * every script on a page that can exceed a megabyte, and they mutate constantly (price
  * polling, lazy images, carousels); running it per mutation would burn the
  * user's main thread continuously.
+ *
+ * Two things travel alongside the report, both so the worker never has to read
+ * a URL out of the browser (which would cost the `tabs` permission — "Read
+ * your browsing history"):
+ *  - a presence port (`lib/presence.ts`), whose disconnection tells the worker
+ *    this document is gone and its verdict must go with it;
+ *  - `PAGE_MOVED`, this page's own `location.href` whenever it changes without
+ *    a document load — the single-page-app navigation the port cannot see,
+ *    because no new document is ever created.
  */
 export default defineContentScript({
   matches: [...LISTING_MATCH_PATTERNS],
@@ -46,6 +56,33 @@ export default defineContentScript({
     // out. A name-only dedup would lock in that partial read for the whole
     // page view. The worker's run-id supersession keeps whichever is newest.
     const gate = createReportGate();
+
+    /**
+     * This document's announcement to the worker. Connected lazily — from
+     * `report()`, the one path that creates worker state — so a listing page
+     * the user opens and never analyses does not hold an MV3 service worker
+     * awake, and so the port comes back after Chrome retires the worker and
+     * the panel asks for a fresh report.
+     */
+    const presence = createPresenceClient(() =>
+      browser.runtime.connect({ name: PRESENCE_PORT_NAME }),
+    );
+
+    /**
+     * The address this page last told the worker about. Reported on change
+     * only, so the common case — a mutation burst at a standing URL — costs
+     * one string comparison and no message at all.
+     */
+    let reportedLocation: string | undefined;
+
+    const reportLocation = (): void => {
+      if (location.href === reportedLocation) return;
+      reportedLocation = location.href;
+      const message: PageMovedMessage = { type: 'PAGE_MOVED', url: location.href };
+      void browser.runtime.sendMessage(message).catch(() => {
+        // Worker asleep: it holds no state to correct either.
+      });
+    };
 
     const report = (): void => {
       // The page is attacker-authored. Extraction is written not to throw, but
@@ -86,6 +123,10 @@ export default defineContentScript({
           ...(terms === undefined ? {} : { terms }),
           context,
         };
+        // Armed before the state it protects exists: from here on the worker
+        // holds a verdict for this document, and must learn the moment this
+        // document stops existing.
+        presence.ensure();
         void browser.runtime.sendMessage(message).catch(() => {
           // Worker asleep or panel closed — nothing to recover here.
         });
@@ -106,18 +147,46 @@ export default defineContentScript({
     // the panel also pings tabs whose first read simply has not happened yet,
     // and an immediate extraction there would read a page mid-hydration —
     // the settle wait is the whole point of this file.
+    const rereport = (): void => {
+      gate.reset();
+      scheduler.bump();
+    };
+
     browser.runtime.onMessage.addListener((message: ExtensionMessage) => {
-      if (message.type === 'REREPORT') {
-        gate.reset();
-        scheduler.bump();
-      }
+      if (message.type === 'REREPORT') rereport();
       return undefined;
     });
 
-    new MutationObserver(scheduler.bump).observe(document.documentElement, {
-      childList: true,
-      subtree: true,
+    // Restored from the back/forward cache. Chrome closes extension ports to
+    // let a page into that cache, so the worker saw this document depart and
+    // dropped its verdict — but nothing here re-runs on the way back in
+    // (`main()` does not, and an unchanged DOM mutates nothing), so the page
+    // would sit there analysed-and-unreported until the user happened to
+    // switch tabs. Report it again, and re-arm presence along with it.
+    window.addEventListener('pageshow', (event) => {
+      if ((event as PageTransitionEvent).persisted) rereport();
     });
+
+    // A single-page-app navigation fires no load event and destroys no
+    // document, so the address change is reported at the FIRST mutation of the
+    // burst rather than behind the settle wait: extraction can afford to wait
+    // for a page to finish rebuilding, but a verdict for the listing the user
+    // just left cannot stay on screen for those two seconds. The check itself
+    // is one string comparison per batch, alongside the bump already there.
+    new MutationObserver(() => {
+      reportLocation();
+      scheduler.bump();
+    }).observe(document.documentElement, { childList: true, subtree: true });
+
+    // History-API navigations that touch nothing else (back/forward, an
+    // anchor) fire these instead of mutating.
+    for (const event of ['popstate', 'hashchange'] as const) {
+      window.addEventListener(event, () => {
+        reportLocation();
+        scheduler.bump();
+      });
+    }
+
     scheduler.bump();
   },
 });

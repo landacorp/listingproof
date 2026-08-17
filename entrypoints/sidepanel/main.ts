@@ -77,6 +77,13 @@ const controller = createPanelController({
   },
   queryActive: async () => {
     // In a side panel, `currentWindow` is the window hosting the panel.
+    //
+    // Ids only, and deliberately: `tabs.query` needs no permission, but the
+    // `url`/`title` it would otherwise carry need the `tabs` one — Chrome's
+    // "Read your browsing history" — and the panel has never wanted them. It
+    // follows a NUMBER. `npm run probe:perm` confirms in a real browser that
+    // `id` and `windowId` still arrive with `tabs` gone and `url` blank; do
+    // not start reading `tab.url` here, it would be silently empty.
     const [tab] = await browser.tabs.query({ active: true, currentWindow: true });
     return { tabId: tab?.id, windowId: tab?.windowId };
   },

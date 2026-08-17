@@ -33,12 +33,21 @@
  * because it answered a question the user has already replaced and the newer
  * check owns both the panel and the page's status line.
  *
- * And only onto the tab that asked. A check takes seconds; the tab can navigate
- * inside that window, and a verdict published afterwards would create per-tab
- * state for a page showing nothing related to it — the false display the panel's
- * tab filtering (ROADMAP P0-1) exists to prevent, arriving from behind. So the
- * tab's location is captured when the request is accepted and re-checked before
- * publishing; a tab that moved on is answered with silence.
+ * And only onto the page that asked. A check takes seconds; the tab can
+ * navigate inside that window, and a verdict published afterwards would create
+ * per-tab state for a page showing nothing related to it — the false display
+ * the panel's tab filtering (ROADMAP P0-1) exists to prevent, arriving from
+ * behind. So the asking PAGE is identified when the request is accepted and
+ * re-checked before publishing; a page that is gone is answered with silence.
+ *
+ * "Which page" is a presence token from `lib/presence.ts` — the search page's
+ * own `runtime.connect` port — not the tab's URL. That used to be
+ * `browser.tabs.get(tabId).url`, which bought this one comparison at the price
+ * of the `tabs` permission ("Read your browsing history" in the install
+ * dialog). The port is strictly better anyway: a RELOAD of the search page
+ * keeps its URL but destroys the result list the user was looking at, and a
+ * verdict for a result that no longer exists is exactly the false display this
+ * guard exists to prevent. A reload is a new document, so it is a new token.
  *
  * Wiring: the service worker must create ONE handler and share it. Each
  * instance that falls back to its own default limiter is a separate politeness
@@ -139,16 +148,21 @@ export interface FocusListingOptions {
    */
   maxInFlightPerTab?: number;
   /**
-   * Where a tab is right now, or undefined when that cannot be established.
-   * Production: `browser.tabs.get(tabId)` in the worker (the `tabs` permission
-   * is already held). Rejections and closed tabs are the caller's business to
-   * surface as undefined or as a rejection — both read as "gone".
+   * Which page is connected from a tab right now, or undefined when none is —
+   * a closed tab, a page that has navigated away, or a worker whose port
+   * bookkeeping has no entry for it. Production: the presence registry in
+   * `entrypoints/background.ts`.
+   *
+   * Synchronous by construction: the registry is a Map the worker already
+   * holds, so unlike the `tabs.get()` round trip it replaced there is no await
+   * between deciding to publish and publishing, and therefore no window for a
+   * newer click to slip through it.
    *
    * Defaults to "never knew", which skips the publish-time check entirely: a
-   * handler wired without this cannot tell a moved tab from a still one, and
-   * inventing an answer would suppress verdicts rather than protect them.
+   * handler wired without this cannot tell a departed page from a present one,
+   * and inventing an answer would suppress verdicts rather than protect them.
    */
-  tabUrl?: (tabId: number) => Promise<string | undefined>;
+  askerToken?: (tabId: number) => number | undefined;
 }
 
 export interface FocusListingHandler {
@@ -173,7 +187,7 @@ export function createFocusListingHandler(options: FocusListingOptions): FocusLi
   const canonicalize = options.canonicalize ?? registryCanonicalize;
   const { parseListingHtml, onListingDetected } = options;
   const maxInFlightPerTab = options.maxInFlightPerTab ?? FOCUS_MAX_IN_FLIGHT_PER_TAB;
-  const tabUrl = options.tabUrl ?? (async () => undefined);
+  const askerToken = options.askerToken ?? ((): number | undefined => undefined);
 
   /** Canonical URLs currently being fetched/parsed, per search tab. */
   const inFlight = new Map<number, Set<string>>();
@@ -195,41 +209,20 @@ export function createFocusListingHandler(options: FocusListingOptions): FocusLi
     latest.delete(tabId);
   }
 
-  /** Where the tab is, with a lookup failure (closed tab) read as "gone". */
-  async function whereIsTab(tabId: number): Promise<string | undefined> {
-    try {
-      return await tabUrl(tabId);
-    } catch {
-      return undefined;
-    }
-  }
-
   /**
-   * Same page, allowing for a URL respelled where it stands: a listing page
-   * that swapped its locale suffix or gained tracking params is the page that
-   * asked, not a navigation. Compared through the same gate everything else
-   * here goes through, so two spellings of one listing are one page.
-   */
-  function samePage(one: string, other: string): boolean {
-    if (one === other) return true;
-    const canonical = canonicalize(one)?.canonicalUrl;
-    return canonical !== undefined && canonical === canonicalize(other)?.canonicalUrl;
-  }
-
-  /**
-   * Is the tab still the page that asked for this check?
+   * Is the page that asked for this check still there?
    *
    * `asked === undefined` means the wiring cannot answer the question (no
-   * `tabUrl` injected, or the lookup failed at accept time) — an unknown, and
-   * an unknown must not silence a verdict the user is waiting for. A tab that
-   * has since closed or that cannot report a URL counts as moved on: there is
-   * nobody left to show a verdict to.
+   * `askerToken` injected, or the page had no port when the request was
+   * accepted) — an unknown, and an unknown must not silence a verdict the user
+   * is waiting for. Anything else is a comparison of page identities: no token
+   * means the document is gone (navigated, reloaded, closed), and a DIFFERENT
+   * token means a later document owns the tab now. Both leave nobody to show
+   * this verdict to.
    */
-  async function stillTheAskingPage(tabId: number, asked: string | undefined): Promise<boolean> {
+  function stillTheAskingPage(tabId: number, asked: number | undefined): boolean {
     if (asked === undefined) return true;
-    const now = await whereIsTab(tabId);
-    if (now === undefined) return false;
-    return samePage(now, asked);
+    return askerToken(tabId) === asked;
   }
 
   return {
@@ -269,12 +262,11 @@ export function createFocusListingHandler(options: FocusListingOptions): FocusLi
       tabFlights.add(canonicalUrl);
       latest.set(tabId, canonicalUrl);
 
-      // Where the tab is as this request is accepted. Started, not awaited:
-      // the fetch has to leave in this same turn, or a burst of clicks would
-      // queue up behind a tab lookup and the deduplication recorded a line
-      // above would be doing its work after the fact. The answer is only
-      // needed much later, at publish time.
-      const askedFrom = whereIsTab(tabId);
+      // Which page is asking, captured now and compared at publish time. A
+      // plain Map read, so unlike the `tabs.get()` round trip this replaced it
+      // costs the accept path nothing and needs no "started, not awaited"
+      // dance to keep a burst of clicks from queueing behind it.
+      const askedBy = askerToken(tabId);
 
       /**
        * A refusal is news only while this flight still owns the tab. A stale
@@ -367,18 +359,18 @@ export function createFocusListingHandler(options: FocusListingOptions): FocusLi
           return { ok: true };
         }
 
-        // ...and the tab must still be the page that asked. This check has been
+        // ...and the page that asked must still be there. This check has been
         // in the air for seconds; the tab may have gone to the listing itself,
-        // to another result, or somewhere unrelated — and its per-tab state was
-        // dropped when it did. Publishing now would resurrect a verdict for a
-        // page the tab is not on: the same false display P0-1 fixed in the
-        // panel, arriving from behind. Nothing is reported to the page either:
-        // the page that asked is gone.
-        if (!(await stillTheAskingPage(tabId, await askedFrom))) {
-          return { ok: true };
-        }
-        // That await is one more window for a newer click to claim the tab.
-        if (latest.get(tabId) !== canonicalUrl) {
+        // to another result, or somewhere unrelated, and the search page may
+        // simply have been reloaded — and its per-tab state was dropped when
+        // it did. Publishing now would resurrect a verdict for a page that no
+        // longer exists: the same false display P0-1 fixed in the panel,
+        // arriving from behind. Nothing is reported to the page either: the
+        // page that asked is gone.
+        //
+        // No await here, deliberately — the supersession check above is still
+        // the newest word on this tab when this runs.
+        if (!stillTheAskingPage(tabId, askedBy)) {
           return { ok: true };
         }
 
